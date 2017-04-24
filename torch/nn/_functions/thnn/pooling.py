@@ -54,13 +54,14 @@ class MaxPool1d(Function):
         grad_output2d = grad_output.unsqueeze(2)
         grad_input = grad_output2d.new()
         backend = type2backend[type(input)]
-        backend.SpatialDilatedMaxPooling_updateGradInput(backend.library_state,
-                                                         input2d, grad_output2d, grad_input, indices2d,
-                                                         self.kernel_size, 1,
-                                                         self.stride, 1,
-                                                         self.pad, 0,
-                                                         self.dilation, 1,
-                                                         self.ceil_mode)
+        backend.SpatialDilatedMaxPooling_updateGradInput(
+            backend.library_state,
+            input2d, grad_output2d, grad_input, indices2d,
+            self.kernel_size, 1,
+            self.stride, 1,
+            self.pad, 0,
+            self.dilation, 1,
+            self.ceil_mode)
         grad_input = grad_input.squeeze(2)
         return grad_input
 
@@ -79,13 +80,14 @@ class MaxPool2d(Function):
     def forward(self, input):
         backend = type2backend[type(input)]
         indices, output = input.new().long(), input.new()
-        backend.SpatialDilatedMaxPooling_updateOutput(backend.library_state,
-                                                      input, output, indices,
-                                                      self.kernel_size[1], self.kernel_size[0],
-                                                      self.stride[1], self.stride[0],
-                                                      self.padding[1], self.padding[0],
-                                                      self.dilation[1], self.dilation[0],
-                                                      self.ceil_mode)
+        backend.SpatialDilatedMaxPooling_updateOutput(
+            backend.library_state,
+            input, output, indices,
+            self.kernel_size[1], self.kernel_size[0],
+            self.stride[1], self.stride[0],
+            self.padding[1], self.padding[0],
+            self.dilation[1], self.dilation[0],
+            self.ceil_mode)
         if self.return_indices:
             self.save_for_backward(input, indices)
             self.mark_non_differentiable(indices)
@@ -103,13 +105,14 @@ class MaxPool2d(Function):
             indices = self.indices
         grad_input = grad_output.new()
         backend = type2backend[type(input)]
-        backend.SpatialDilatedMaxPooling_updateGradInput(backend.library_state,
-                                                         input, grad_output, grad_input, indices,
-                                                         self.kernel_size[1], self.kernel_size[0],
-                                                         self.stride[1], self.stride[0],
-                                                         self.padding[1], self.padding[0],
-                                                         self.dilation[1], self.dilation[0],
-                                                         self.ceil_mode)
+        backend.SpatialDilatedMaxPooling_updateGradInput(
+            backend.library_state,
+            input, grad_output, grad_input, indices,
+            self.kernel_size[1], self.kernel_size[0],
+            self.stride[1], self.stride[0],
+            self.padding[1], self.padding[0],
+            self.dilation[1], self.dilation[0],
+            self.ceil_mode)
         return grad_input
 
 
@@ -127,13 +130,14 @@ class MaxPool3d(Function):
     def forward(self, input):
         backend = type2backend[type(input)]
         indices, output = input.new().long(), input.new()
-        backend.VolumetricDilatedMaxPooling_updateOutput(backend.library_state,
-                                                         input, output, indices,
-                                                         self.kernel_size[0], self.kernel_size[2], self.kernel_size[1],
-                                                         self.stride[0], self.stride[2], self.stride[1],
-                                                         self.padding[0], self.padding[2], self.padding[1],
-                                                         self.dilation[0], self.dilation[2], self.dilation[1],
-                                                         self.ceil_mode)
+        backend.VolumetricDilatedMaxPooling_updateOutput(
+            backend.library_state,
+            input, output, indices,
+            self.kernel_size[0], self.kernel_size[2], self.kernel_size[1],
+            self.stride[0], self.stride[2], self.stride[1],
+            self.padding[0], self.padding[2], self.padding[1],
+            self.dilation[0], self.dilation[2], self.dilation[1],
+            self.ceil_mode)
         if self.return_indices:
             self.save_for_backward(input, indices)
             self.mark_non_differentiable(indices)
@@ -151,14 +155,15 @@ class MaxPool3d(Function):
             indices = self.indices
         grad_input = grad_output.new()
         backend = type2backend[type(input)]
-        backend.VolumetricDilatedMaxPooling_updateGradInput(backend.library_state,
-                                                            input, grad_output, grad_input, indices,
-                                                            self.kernel_size[0], self.kernel_size[
-                                                                2], self.kernel_size[1],
-                                                            self.stride[0], self.stride[2], self.stride[1],
-                                                            self.padding[0], self.padding[2], self.padding[1],
-                                                            self.dilation[0], self.dilation[2], self.dilation[1],
-                                                            self.ceil_mode)
+        backend.VolumetricDilatedMaxPooling_updateGradInput(
+            backend.library_state,
+            input, grad_output, grad_input, indices,
+            self.kernel_size[0], self.kernel_size[
+                2], self.kernel_size[1],
+            self.stride[0], self.stride[2], self.stride[1],
+            self.padding[0], self.padding[2], self.padding[1],
+            self.dilation[0], self.dilation[2], self.dilation[1],
+            self.ceil_mode)
         return grad_input
 
 
@@ -348,20 +353,22 @@ class AvgPool3d(Function):
         output = input.new()
         # can avoid this with cudnn
         self.save_for_backward(input)
-        backend.VolumetricAveragePooling_updateOutput(backend.library_state,
-                                                      input, output,
-                                                      self.kernel_size[0], self.kernel_size[2], self.kernel_size[1],
-                                                      self.stride[0], self.stride[2], self.stride[1])
+        backend.VolumetricAveragePooling_updateOutput(
+            backend.library_state,
+            input, output,
+            self.kernel_size[0], self.kernel_size[2], self.kernel_size[1],
+            self.stride[0], self.stride[2], self.stride[1])
         return output
 
     def backward(self, grad_output):
         backend = type2backend[type(grad_output)]
         input, = self.saved_tensors
         grad_input = grad_output.new()
-        backend.VolumetricAveragePooling_updateGradInput(backend.library_state,
-                                                         input, grad_output, grad_input,
-                                                         self.kernel_size[0], self.kernel_size[2], self.kernel_size[1],
-                                                         self.stride[0], self.stride[2], self.stride[1])
+        backend.VolumetricAveragePooling_updateGradInput(
+            backend.library_state,
+            input, grad_output, grad_input,
+            self.kernel_size[0], self.kernel_size[2], self.kernel_size[1],
+            self.stride[0], self.stride[2], self.stride[1])
         return grad_input
 
 
@@ -379,9 +386,10 @@ class AdaptiveMaxPool1d(Function):
         input2d = input.unsqueeze(2)    # size = N*C*1*L
         backend = type2backend[type(input)]
         indices, output = input2d.new().long(), input2d.new()
-        backend.SpatialAdaptiveMaxPooling_updateOutput(backend.library_state,
-                                                       input2d, output, indices,
-                                                       self.output_size[0], 1)
+        backend.SpatialAdaptiveMaxPooling_updateOutput(
+            backend.library_state,
+            input2d, output, indices,
+            self.output_size[0], 1)
         indices = indices.squeeze(2)
         output = output.squeeze(2)
         if self.return_indices:
@@ -405,8 +413,9 @@ class AdaptiveMaxPool1d(Function):
         grad_output2d = grad_output.unsqueeze(2)
         grad_input = grad_output2d.new()
         backend = type2backend[type(input)]
-        backend.SpatialAdaptiveMaxPooling_updateGradInput(backend.library_state,
-                                                          input2d, grad_output2d, grad_input, indices2d)
+        backend.SpatialAdaptiveMaxPooling_updateGradInput(
+            backend.library_state,
+            input2d, grad_output2d, grad_input, indices2d)
         grad_input = grad_input.squeeze(2)
         return grad_input
 
@@ -420,9 +429,10 @@ class AdaptiveMaxPool2d(Function):
     def forward(self, input):
         backend = type2backend[type(input)]
         indices, output = input.new().long(), input.new()
-        backend.SpatialAdaptiveMaxPooling_updateOutput(backend.library_state,
-                                                       input, output, indices,
-                                                       self.output_size[1], self.output_size[0])
+        backend.SpatialAdaptiveMaxPooling_updateOutput(
+            backend.library_state,
+            input, output, indices,
+            self.output_size[1], self.output_size[0])
         if self.return_indices:
             self.save_for_backward(input, indices)
             self.mark_non_differentiable(indices)
@@ -440,8 +450,9 @@ class AdaptiveMaxPool2d(Function):
             indices = self.indices
         grad_input = grad_output.new()
         backend = type2backend[type(input)]
-        backend.SpatialAdaptiveMaxPooling_updateGradInput(backend.library_state,
-                                                          input, grad_output, grad_input, indices)
+        backend.SpatialAdaptiveMaxPooling_updateGradInput(
+            backend.library_state,
+            input, grad_output, grad_input, indices)
         return grad_input
 
 
@@ -503,6 +514,45 @@ class AdaptiveAvgPool2d(Function):
             input, grad_output, grad_input)
         return grad_input
 
+
+class MAC(Function):
+
+    def forward(self, input):
+        _, K, H, W = input.size()
+        wl = min(H, W)
+        backend = type2backend[type(input)]
+        indices, output = input.new().long(), input.new()
+        self.save_for_backward(input)
+        backend.SpatialDilatedMaxPooling_updateOutput(
+            backend.library_state,
+            input, output, indices,
+            wl, wl,  # kernel size
+            wl, wl,  # stride
+            0, 0,  # padding
+            1, 1,  # dilation
+            False)
+        self.save_for_backward(input)
+        self.indices = indices
+        return output
+
+    def backward(self, grad_output):
+        input, = self.saved_tensors
+        indices = self.indices
+        grad_input = grad_output.new()
+        backend = type2backend[type(input)]
+        backend.SpatialDilatedMaxPooling_updateGradInput(
+            backend.library_state,
+            input, grad_output, grad_input, indices,
+            wl, wl,  # kernel size
+            wl, wl,  # stride
+            0, 0,  # padding
+            1, 1,  # dilation
+            False)
+        return grad_input
+
+# class RMAC(Function):
+
+
 _all_functions.append(AvgPool2d)
 _all_functions.append(AvgPool3d)
 _all_functions.append(MaxPool1d)
@@ -515,3 +565,4 @@ _all_functions.append(AdaptiveMaxPool1d)
 _all_functions.append(AdaptiveMaxPool2d)
 _all_functions.append(AdaptiveAvgPool1d)
 _all_functions.append(AdaptiveAvgPool2d)
+_all_functions.append(MAC)
