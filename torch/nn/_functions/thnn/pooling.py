@@ -537,7 +537,7 @@ class MAC(Function):
             0, 0,  # padding
             1, 1,  # dilation
             False)
-    return grad_input
+        return grad_input
 
 _all_functions.append(AvgPool2d)
 _all_functions.append(AvgPool3d)
