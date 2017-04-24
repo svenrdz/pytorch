@@ -503,6 +503,42 @@ class AdaptiveAvgPool2d(Function):
             input, grad_output, grad_input)
         return grad_input
 
+
+class MAC(Function):
+
+    def forward(self, input):
+        _, K, H, W = input.size()
+        wl = min(H, W)
+        backend = type2backend[type(input)]
+        indices, output = input.new().long(), input.new()
+        self.save_for_backward(input)
+        backend.SpatialDilatedMaxPooling_updateOutput(
+            backend.library_state,
+            input, output, indices,
+            wl, wl,  # kernel size
+            wl, wl,  # stride
+            0, 0,  # padding
+            1, 1,  # dilation
+            False)
+        self.save_for_backward(input)
+        self.indices = indices
+        return output
+
+    def backward(self, grad_output):
+        input, = self.saved_tensors
+        indices = self.indices
+        grad_input = grad_output.new()
+        backend = type2backend[type(input)]
+        backend.SpatialDilatedMaxPooling_updateGradInput(
+            backend.library_state,
+            input, grad_output, grad_input, indices,
+            wl, wl,  # kernel size
+            wl, wl,  # stride
+            0, 0,  # padding
+            1, 1,  # dilation
+            False)
+return grad_input
+
 _all_functions.append(AvgPool2d)
 _all_functions.append(AvgPool3d)
 _all_functions.append(MaxPool1d)
@@ -515,3 +551,4 @@ _all_functions.append(AdaptiveMaxPool1d)
 _all_functions.append(AdaptiveMaxPool2d)
 _all_functions.append(AdaptiveAvgPool1d)
 _all_functions.append(AdaptiveAvgPool2d)
+_all_functions.append(MAC)

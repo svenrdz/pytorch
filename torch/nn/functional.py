@@ -360,6 +360,10 @@ def adaptive_avg_pool2d(input, output_size):
     return _functions.thnn.AdaptiveAvgPool2d(output_size)(input)
 
 
+def mac(input):
+    return _functions.thnn.MAC()(input)
+
+
 # Activation functions
 
 def dropout(input, p=0.5, training=False, inplace=False):
