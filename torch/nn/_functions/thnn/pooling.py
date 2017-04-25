@@ -542,16 +542,17 @@ class MAC(Function):
 
 class RMAC(Function):
 
-    def __init__(self, levels=3, overlap=0.4):
+    def __init__(self, levels=3, overlap=0.4, eps=1e-4):
         self.levels = levels
         self.overlap = overlap
+        self.eps = eps
 
     def forward(self, input):
         B, K, H, W = input.size()
-        assert B == 1, "RMAC only works for single image"
         w = min(H, W)
         max_steps = max(H, W) // min(H, W)
         overlap = self.overlap
+        eps = self.eps
         if H != W:
             steps = arange(0, max_steps)
             b = steps.add(1).div(max(H, W) - w).pow(-1)
@@ -565,7 +566,6 @@ class RMAC(Function):
             Wd, Hd = 0, 0
 
         backend = type2backend[type(input)]
-        # TODO: LEVELS + NORM + CAT OUTPUTS + SUM + NORM
         indices, output = input.new().long(), input.new()
         self.save_for_backward(input)
 
@@ -576,13 +576,20 @@ class RMAC(Function):
                                                            input, level_out, indices,
                                                            Ws, Hs)
             level_out = level_out.view(B, K, -1)
-            region_norm = level_out.norm(2, 1).expand_as(level_out)
+            region_norm = level_out.norm(2, 1).expand_as(level_out).add(eps)
             level_out = level_out.div(region_norm).sum(2).squeeze(2)
             if output.dim() == 0:
                 output = level_out
             else:
                 output += level_out
-        return output.div(output.norm(2))
+
+        # Necessary as the output becomes 1 everywhere when dividing by
+        # torch.norm(output, 2, 0) if batchsize is one
+        if B == 1:
+            batch_norm = output.norm(2)
+        else:
+            batch_norm = output.norm(2, 0).expand_as(output)
+        return output.div(batch_norm.add(eps))
 
 
 _all_functions.append(AvgPool2d)
