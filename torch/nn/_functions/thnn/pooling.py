@@ -1,5 +1,6 @@
 from torch.autograd.function import Function
 from torch._thnn import type2backend
+from torch import arange
 
 from . import _all_functions
 from torch.nn.modules.utils import _single, _pair, _triple
@@ -539,6 +540,51 @@ class MAC(Function):
             False)
         return grad_input
 
+class RMAC(Function):
+
+    def __init__(self, levels=3, overlap=0.4):
+        self.levels = levels
+        self.overlap = overlap
+
+    def forward(self, input):
+        B, K, H, W = input.size()
+        assert B == 1, "RMAC only works for single image"
+        w = min(H, W)
+        max_steps = max(H, W) // min(H, W)
+        overlap = self.overlap
+        if H != W:
+            steps = arange(0, max_steps)
+            b = steps.add(1).div(max(H, W) - w).pow(-1)
+            val = b.mul(w).mul(-1).add(w**2).div(w**2).sub(overlap).abs()
+            idx = int(steps.dot(val.eq(val.min()).float()))
+            if H < W:
+                Wd, Hd = idx, 0
+            elif H > W:
+                Wd, Hd = 0, idx
+        else:
+            Wd, Hd = 0, 0
+
+        backend = type2backend[type(input)]
+        # TODO: LEVELS + NORM + CAT OUTPUTS + SUM + NORM
+        indices, output = input.new().long(), input.new()
+        self.save_for_backward(input)
+
+        for l in range(self.levels):
+            level_out = input.new()
+            Ws, Hs = l + Wd or 1, l + Hd or 1
+            backend.SpatialAdaptiveMaxPooling_updateOutput(backend.library_state,
+                                                           input, level_out, indices,
+                                                           Ws, Hs)
+            level_out = level_out.view(B, K, -1)
+            region_norm = level_out.norm(2, 1).expand_as(level_out)
+            level_out = level_out.div(region_norm).sum(2).squeeze(2)
+            if output.dim() == 0:
+                output = level_out
+            else:
+                output += level_out
+        return output.div(output.norm(2))
+
+
 _all_functions.append(AvgPool2d)
 _all_functions.append(AvgPool3d)
 _all_functions.append(MaxPool1d)
@@ -552,3 +598,4 @@ _all_functions.append(AdaptiveMaxPool2d)
 _all_functions.append(AdaptiveAvgPool1d)
 _all_functions.append(AdaptiveAvgPool2d)
 _all_functions.append(MAC)
+_all_functions.append(RMAC)
