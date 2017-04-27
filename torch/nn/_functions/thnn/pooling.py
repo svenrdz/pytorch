@@ -1,5 +1,6 @@
 from torch.autograd.function import Function
 from torch._thnn import type2backend
+from torch import arange, cat, FloatTensor
 
 from . import _all_functions
 from torch.nn.modules.utils import _single, _pair, _triple
@@ -503,6 +504,147 @@ class AdaptiveAvgPool2d(Function):
             input, grad_output, grad_input)
         return grad_input
 
+
+class MAC(Function):
+
+    def forward(self, input):
+        H, W = input.size(2), input.size(3)
+        wl = min(H, W)
+        backend = type2backend[type(input)]
+        indices, output = input.new().long(), input.new()
+        self.save_for_backward(input)
+        backend.SpatialDilatedMaxPooling_updateOutput(
+            backend.library_state,
+            input, output, indices,
+            wl, wl,  # kernel size
+            wl, wl,  # stride
+            0, 0,  # padding
+            1, 1,  # dilation
+            False)
+        self.save_for_backward(input)
+        self.indices = indices
+        return output
+
+    def backward(self, grad_output):
+        input, = self.saved_tensors
+        indices = self.indices
+        H, W = input.size(2), input.size(3)
+        wl = min(H, W)
+        grad_input = grad_output.new()
+        backend = type2backend[type(input)]
+        backend.SpatialDilatedMaxPooling_updateGradInput(
+            backend.library_state,
+            input, grad_output, grad_input, indices,
+            wl, wl,  # kernel size
+            wl, wl,  # stride
+            0, 0,  # padding
+            1, 1,  # dilation
+            False)
+        return grad_input
+
+class RMAC(Function):
+
+    def __init__(self, levels=3, overlap=0.4, eps=1e-4):
+        self.levels = levels
+        self.overlap = overlap
+        self.eps = eps
+
+    def _ratio2regions(self, W, H, w):
+        # needs rename (no idea)
+        max_steps = max(H, W) // min(H, W)
+        overlap = self.overlap
+        eps = self.eps
+        if H != W:
+            steps = arange(0, max_steps).cuda()
+            b = steps.add(1).div(max(H, W) - w).pow(-1)
+            val = b.mul(w).mul(-1).add(w**2).div(w**2).sub(overlap).abs()
+            idx = steps.dot(val.eq(val.min()).float())
+            if H < W:
+                Wd, Hd = idx, 0
+            elif H > W:
+                Wd, Hd = 0, idx
+        else:
+            Wd, Hd = 0, 0
+        return Wd, Hd
+
+    def forward(self, input):
+        B, K, H, W = input.size()
+        w = min(H, W)
+        Wd, Hd = self._ratio2regions(H, W, w)
+        eps = self.eps
+
+        backend = type2backend[type(input)]
+        all_indices = []
+        all_output = input.new()
+        self.save_for_backward(input)
+
+        for l in range(self.levels):
+            output = input.new()
+            indices = input.new().long()
+            wl = 2 * w // (l + 2)
+            Wb = (W - wl) // (l + Wd or 1)
+            Hb = (H - wl) // (l + Hd or 1)
+            backend.SpatialDilatedMaxPooling_updateOutput(
+                backend.library_state,
+                input, output, indices,
+                wl, wl,  # kernel size
+                Wb or wl, Hb or wl,  # stride
+                0, 0,  # padding
+                1, 1,  # dilation
+                False)
+            output = output.view(B, K, -1)
+            # region_norm = output.norm(2, 1).expand_as(output).add(eps)
+            # output = output.div(region_norm).sum(2).squeeze(2)
+
+            all_output = cat([all_output, output], 2)
+            all_indices.append(indices)
+
+        region_norms = all_output.norm(2,1).expand_as(all_output).add(eps)
+        all_output = all_output.div(region_norms).sum(2).squeeze(2)
+        self.all_indices = all_indices
+
+        # Necessary as the output becomes 1 everywhere when dividing by
+        # torch.norm(output, 2, 0) if batchsize is one
+        if B == 1:
+            b_norm = all_output.norm(2) + eps
+        else:
+            b_norm = all_output.norm(2, 0).expand_as(all_output).add(eps)
+        return all_output.div(b_norm)
+
+    def backward(self, all_grad_output):
+        input, = self.saved_tensors
+        H, W = input.size(2), input.size(3)
+        w = min(H, W)
+        Wd, Hd = self._ratio2regions(H, W, w)
+
+        all_grad_output = all_grad_output.unsqueeze(2).unsqueeze(2)
+        backend = type2backend[type(input)]
+        all_indices = self.all_indices
+        all_grad_input = all_grad_output.new()
+
+        for l in range(self.levels):
+            grad_input = all_grad_output.new()
+            indices = all_indices[l]
+            grad_output = all_grad_output.expand_as(indices)
+            wl = 2 * w // (l + 2)
+            Wb = (W - wl) // (l + Wd or 1)
+            Hb = (H - wl) // (l + Hd or 1)
+            backend.SpatialDilatedMaxPooling_updateGradInput(
+                backend.library_state,
+                input, grad_output, grad_input, indices,
+                wl, wl,  # kernel size
+                Wb or wl, Hb or wl,  # stride
+                0, 0,  # padding
+                1, 1,  # dilation
+                False)
+            if all_grad_input.dim() == 0:
+                all_grad_input = grad_input
+            else:
+                all_grad_input += grad_input
+        return all_grad_input
+
+
+
 _all_functions.append(AvgPool2d)
 _all_functions.append(AvgPool3d)
 _all_functions.append(MaxPool1d)
@@ -515,3 +657,5 @@ _all_functions.append(AdaptiveMaxPool1d)
 _all_functions.append(AdaptiveMaxPool2d)
 _all_functions.append(AdaptiveAvgPool1d)
 _all_functions.append(AdaptiveAvgPool2d)
+_all_functions.append(MAC)
+_all_functions.append(RMAC)
