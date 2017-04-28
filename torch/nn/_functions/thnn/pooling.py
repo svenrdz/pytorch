@@ -590,13 +590,14 @@ class Rmac1d(Function):
     def forward(self, input):
         batch_size, num_features, input_len = input.size()
         eps = self.eps
+        levels = self.levels
 
         backend = type2backend[type(input)]
         all_indices = []
         all_output = []
         self.save_for_backward(input)
 
-        for level in range(self.levels):
+        for level in range(levels):
             output = input.new()
             indices = input.new().long()
             pool_size = 2 * input_len // (level + 2)
@@ -631,13 +632,14 @@ class Rmac1d(Function):
     def backward(self, all_grad_output):
         input, = self.saved_tensors
         input_len = input.size(2)
+        levels = self.levels
 
         all_grad_output = all_grad_output.unsqueeze(2).unsqueeze(2)
         backend = type2backend[type(input)]
         all_indices = self.all_indices
         all_grad_input = all_grad_output.new()
 
-        for level in range(self.levels):
+        for level in range(levels):
             grad_input = all_grad_output.new()
             indices = all_indices[level]
             grad_output = all_grad_output.expand_as(indices)
@@ -680,7 +682,7 @@ class Rmac2d(Function):
             steps = self.steps.narrow(0, 0, max_steps)
             b = (large_edge - small_edge) / (steps + 1)
             val = ((small_edge**2 - small_edge * b) / (small_edge**2) - overlap).abs()
-            idx = steps.dot(val.eq(val.min()).float())
+            idx = int(steps.dot(val.eq(val.min()).float()))
             if input_height < input_width:
                 w_steps, h_steps = idx, 0
             elif input_height > input_width:
@@ -694,13 +696,14 @@ class Rmac2d(Function):
         small_edge = min(input_height, input_width)
         w_steps, h_steps = self._ratio2regions(input_height, input_width)
         eps = self.eps
+        levels = self.levels
 
         backend = type2backend[type(input)]
         all_indices = []
         all_output = []
         self.save_for_backward(input)
 
-        for level in range(self.levels):
+        for level in range(levels):
             output = input.new()
             indices = input.new().long()
             pool_size = 2 * small_edge // (level + 2)
@@ -739,13 +742,14 @@ class Rmac2d(Function):
         input_height, input_width = input.size(2), input.size(3)
         small_edge = min(input_height, input_width)
         w_steps, h_steps = self._ratio2regions(input_height, input_width)
+        levels = self.levels
 
         all_grad_output = all_grad_output.unsqueeze(2).unsqueeze(2)
         backend = type2backend[type(input)]
         all_indices = self.all_indices
         all_grad_input = all_grad_output.new()
 
-        for level in range(self.levels):
+        for level in range(levels):
             grad_input = all_grad_output.new()
             indices = all_indices[level]
             grad_output = all_grad_output.expand_as(indices)
