@@ -359,12 +359,18 @@ def adaptive_avg_pool2d(input, output_size):
     """
     return _functions.thnn.AdaptiveAvgPool2d(output_size)(input)
 
-
-def rmac(input, levels=3, overlap=0.4):
+def rmac1d(input, levels=3, overlap=0.4):
     assert isinstance(levels, int) and levels > 0, "Levels must be a positive integer."
     if levels == 1:
-        return _functions.thnn.MAC()(input)
-    return _functions.thnn.RMAC(levels, overlap)(input)
+        return _functions.thnn.Mac1d()(input)
+    return _functions.thnn.Rmac1d(levels, overlap)(input)
+
+
+def rmac2d(input, levels=3, overlap=0.4):
+    assert isinstance(levels, int) and levels > 0, "Levels must be a positive integer."
+    if levels == 1:
+        return _functions.thnn.Mac2d()(input)
+    return _functions.thnn.Rmac2d(levels, overlap)(input)
 
 # Activation functions
 
