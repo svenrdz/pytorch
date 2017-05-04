@@ -1,6 +1,6 @@
 from torch.autograd.function import Function
 from torch._thnn import type2backend
-from torch import arange, cat, cuda, FloatTensor
+from torch import arange, cat, cuda, numel, FloatTensor
 from math import inf
 
 from . import _all_functions
@@ -634,7 +634,7 @@ class Rmac1d(Function):
         input_len = input.size(2)
         levels = self.levels
 
-        all_grad_output = all_grad_output.unsqueeze(2).unsqueeze(2)
+        all_grad_output = all_grad_output.unsqueeze(2)
         backend = type2backend[type(input)]
         all_indices = self.all_indices
         all_grad_input = all_grad_output.new()
@@ -642,7 +642,7 @@ class Rmac1d(Function):
         for level in range(levels):
             grad_input = all_grad_output.new()
             indices = all_indices[level]
-            grad_output = all_grad_output.expand_as(indices)
+            grad_output = all_grad_output.expand_as(indices.squeeze(0))
             pool_size = 2 * input_len // (level + 2)
             stride = (input_len - pool_size) // (level or inf)
             stride = stride or pool_size
@@ -891,7 +891,7 @@ class Raac1d(Function):
         input_len = input.size(2)
         levels = self.levels
 
-        all_grad_output = all_grad_output.unsqueeze(2).unsqueeze(2)
+        all_grad_output = all_grad_output.unsqueeze(2)
         backend = type2backend[type(input)]
         all_sizes = self.all_sizes
         all_grad_input = all_grad_output.new()
@@ -899,6 +899,7 @@ class Raac1d(Function):
         for level in range(levels):
             grad_input = all_grad_output.new()
             current_size = all_sizes[level]
+            print(all_grad_output.size(), current_size)
             grad_output = all_grad_output.expand(current_size)
             pool_size = 2 * input_len // (level + 2)
             stride = (input_len - pool_size) // (level or inf)
@@ -955,8 +956,8 @@ class Raac2d(Function):
         levels = self.levels
 
         backend = type2backend[type(input)]
-        all_output = []
         all_sizes = []
+        all_output = []
         self.save_for_backward(input)
 
         for level in range(levels):
@@ -981,6 +982,7 @@ class Raac2d(Function):
         all_output = cat(all_output, 2)
         region_norms = all_output.norm(2,1).expand_as(all_output) + eps
         all_output = all_output.div(region_norms).sum(2).squeeze(2)
+        self.all_sizes = all_sizes
 
         # Necessary as the output becomes 1 everywhere when dividing by
         # torch.norm(output, 2, 0) if batchsize is one
@@ -996,15 +998,16 @@ class Raac2d(Function):
         small_edge = min(input_height, input_width)
         w_steps, h_steps = self._ratio2regions(input_height, input_width)
         levels = self.levels
-        sizes = self.sizes
 
         all_grad_output = all_grad_output.unsqueeze(2).unsqueeze(2)
         backend = type2backend[type(input)]
+        all_sizes = self.all_sizes
         all_grad_input = all_grad_output.new()
 
         for level in range(levels):
             grad_input = all_grad_output.new()
-            grad_output = all_grad_output.expand_as(sizes)
+            current_size = all_sizes[level]
+            grad_output = all_grad_output.expand(current_size)
             pool_size = 2 * small_edge // (level + 2)
             w_stride = (input_width - pool_size) // (level + w_steps or inf)
             w_stride = w_stride or pool_size
