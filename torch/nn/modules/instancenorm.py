@@ -84,8 +84,11 @@ class InstanceNorm1d(_InstanceNorm):
 
 class InstanceNorm2d(_InstanceNorm):
     r"""Applies Instance Normalization over a 4d input that is seen as a mini-batch of 3d inputs
+
     .. math::
+
         y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter vectors
     of size C (where C is the input size).
@@ -102,9 +105,11 @@ class InstanceNorm2d(_InstanceNorm):
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to true, gives the layer learnable affine parameters.
+
     Shape:
         - Input: :math:`(N, C, H, W)`
         - Output: :math:`(N, C, H, W)` (same shape as input)
+
     Examples:
         >>> # With Learnable Parameters
         >>> m = nn.InstanceNorm2d(100)
