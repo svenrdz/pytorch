@@ -852,6 +852,7 @@ class Raac1d(Function):
         levels = self.levels
 
         backend = type2backend[type(input)]
+        all_sizes = [] # needed in replacement of all_indices hook
         all_output = []
         self.save_for_backward(input)
 
@@ -869,11 +870,13 @@ class Raac1d(Function):
                 False, False)
             # output = output.view(batch_size, num_features, -1)
 
+            all_sizes.append(output.size())
             all_output.append(output)
 
         all_output = cat(all_output, 2)
         region_norms = all_output.norm(2,1).expand_as(all_output) + eps
         all_output = all_output.div(region_norms).sum(2).squeeze(2)
+        self.all_sizes = all_sizes
 
         # Necessary as the output becomes 1 everywhere when dividing by
         # torch.norm(output, 2, 0) if batchsize is one
@@ -890,11 +893,13 @@ class Raac1d(Function):
 
         all_grad_output = all_grad_output.unsqueeze(2).unsqueeze(2)
         backend = type2backend[type(input)]
+        all_sizes = self.all_sizes
         all_grad_input = all_grad_output.new()
 
         for level in range(levels):
             grad_input = all_grad_output.new()
-            grad_output = all_grad_output.expand_as(indices)
+            current_size = all_sizes[level]
+            grad_output = all_grad_output.expand(current_size)
             pool_size = 2 * input_len // (level + 2)
             stride = (input_len - pool_size) // (level or inf)
             stride = stride or pool_size
