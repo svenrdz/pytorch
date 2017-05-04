@@ -773,6 +773,272 @@ class Rmac2d(Function):
         return all_grad_input
 
 
+class Aac1d(Function):
+
+    def forward(self, input):
+        input_len = input.size(2)
+        backend = type2backend[type(input)]
+        indices, output = input.new().long(), input.new()
+        self.save_for_backward(input)
+        backend.SpatialDilatedMaxPooling_updateOutput(
+            backend.library_state,
+            input, output, indices,
+            input_len, 1,  # kernel size
+            input_len, 1,  # stride
+            0, 0,  # padding
+            1, 1,  # dilation
+            False)
+        self.save_for_backward(input)
+        self.indices = indices
+        return output
+
+    def backward(self, grad_output):
+        input, = self.saved_tensors
+        indices = self.indices
+        input_len = input.size(2)
+        grad_input = grad_output.new()
+        backend = type2backend[type(input)]
+        backend.SpatialDilatedMaxPooling_updateGradInput(
+            backend.library_state,
+            input, grad_output, grad_input, indices,
+            input_len, 1,  # kernel size
+            input_len, 1,  # stride
+            0, 0,  # padding
+            1, 1,  # dilation
+            False)
+        return grad_input
+
+
+class Aac2d(Function):
+
+    def forward(self, input):
+        input_height, input_width = input.size(2), input.size(3)
+        pool_size = min(input_height, input_width)
+        backend = type2backend[type(input)]
+        indices, output = input.new().long(), input.new()
+        self.save_for_backward(input)
+        backend.SpatialDilatedMaxPooling_updateOutput(
+            backend.library_state,
+            input, output, indices,
+            pool_size, pool_size,  # kernel size
+            pool_size, pool_size,  # stride
+            0, 0,  # padding
+            1, 1,  # dilation
+            False)
+        self.save_for_backward(input)
+        self.indices = indices
+        return output
+
+    def backward(self, grad_output):
+        input, = self.saved_tensors
+        indices = self.indices
+        input_height, input_width = input.size(2), input.size(3)
+        pool_size = min(input_height, input_width)
+        grad_input = grad_output.new()
+        backend = type2backend[type(input)]
+        backend.SpatialDilatedMaxPooling_updateGradInput(
+            backend.library_state,
+            input, grad_output, grad_input, indices,
+            pool_size, pool_size,  # kernel size
+            pool_size, pool_size,  # stride
+            0, 0,  # padding
+            1, 1,  # dilation
+            False)
+        return grad_input
+
+
+class Raac1d(Function):
+
+    def __init__(self, levels=3, overlap=0.4, eps=1e-4):
+        self.levels = levels
+        self.overlap = overlap
+        self.eps = eps
+
+    def forward(self, input):
+        batch_size, num_features, input_len = input.size()
+        eps = self.eps
+        levels = self.levels
+
+        backend = type2backend[type(input)]
+        all_indices = []
+        all_output = []
+        self.save_for_backward(input)
+
+        for level in range(levels):
+            output = input.new()
+            indices = input.new().long()
+            pool_size = 2 * input_len // (level + 2)
+            stride = (input_len - pool_size) // (level or inf)
+            stride = stride or pool_size
+            backend.SpatialDilatedMaxPooling_updateOutput(
+                backend.library_state,
+                input, output, indices,
+                pool_size, 1,  # kernel size
+                stride, 1,  # stride
+                0, 0,  # padding
+                1, 1,  # dilation
+                False)
+            # output = output.view(batch_size, num_features, -1)
+
+            all_output.append(output)
+            all_indices.append(indices)
+
+        all_output = cat(all_output, 2)
+        region_norms = all_output.norm(2,1).expand_as(all_output) + eps
+        all_output = all_output.div(region_norms).sum(2).squeeze(2)
+        self.all_indices = all_indices
+
+        # Necessary as the output becomes 1 everywhere when dividing by
+        # torch.norm(output, 2, 0) if batchsize is one
+        if batch_size == 1:
+            batch_norm = all_output.norm(2) + eps
+        else:
+            batch_norm = all_output.norm(2, 0).expand_as(all_output) + eps
+        return all_output / batch_norm
+
+    def backward(self, all_grad_output):
+        input, = self.saved_tensors
+        input_len = input.size(2)
+        levels = self.levels
+
+        all_grad_output = all_grad_output.unsqueeze(2).unsqueeze(2)
+        backend = type2backend[type(input)]
+        all_indices = self.all_indices
+        all_grad_input = all_grad_output.new()
+
+        for level in range(levels):
+            grad_input = all_grad_output.new()
+            indices = all_indices[level]
+            grad_output = all_grad_output.expand_as(indices)
+            pool_size = 2 * input_len // (level + 2)
+            stride = (input_len - pool_size) // (level or inf)
+            stride = stride or pool_size
+            backend.SpatialDilatedMaxPooling_updateGradInput(
+                backend.library_state,
+                input, grad_output, grad_input, indices,
+                pool_size, 1,  # kernel size
+                stride, 1,  # stride
+                0, 0,  # padding
+                1, 1,  # dilation
+                False)
+            if all_grad_input.dim() == 0:
+                all_grad_input = grad_input
+            else:
+                all_grad_input += grad_input
+        return all_grad_input
+
+
+class Raac2d(Function):
+
+    def __init__(self, levels=3, overlap=0.4, eps=1e-4):
+        self.levels = levels
+        self.overlap = overlap
+        self.eps = eps
+        if cuda.is_available():
+            self.steps = arange(0, 20).cuda()
+        else:
+            self.steps = arange(0, 20)
+
+    def _ratio2regions(self, input_width, input_height): # needs rename (no idea)
+        if input_width != input_height:
+            small_edge = min(input_width, input_height)
+            large_edge = max(input_height, input_width)
+            max_steps = large_edge // small_edge
+            overlap = self.overlap
+            eps = self.eps
+            steps = self.steps.narrow(0, 0, max_steps)
+            b = (large_edge - small_edge) / (steps + 1)
+            val = ((small_edge**2 - small_edge * b) / (small_edge**2) - overlap).abs()
+            idx = int(steps.dot(val.eq(val.min()).float()))
+            if input_height < input_width:
+                w_steps, h_steps = idx, 0
+            elif input_height > input_width:
+                w_steps, h_steps = 0, idx
+        else:
+            w_steps, h_steps = 0, 0
+        return w_steps, h_steps
+
+    def forward(self, input):
+        batch_size, num_features, input_height, input_width = input.size()
+        small_edge = min(input_height, input_width)
+        w_steps, h_steps = self._ratio2regions(input_height, input_width)
+        eps = self.eps
+        levels = self.levels
+
+        backend = type2backend[type(input)]
+        all_indices = []
+        all_output = []
+        self.save_for_backward(input)
+
+        for level in range(levels):
+            output = input.new()
+            indices = input.new().long()
+            pool_size = 2 * small_edge // (level + 2)
+            w_stride = (input_width - pool_size) // (level + w_steps or inf)
+            w_stride = w_stride or pool_size
+            h_stride = (input_height - pool_size) // (level + h_steps or inf)
+            h_stride = h_stride or pool_size
+            backend.SpatialDilatedMaxPooling_updateOutput(
+                backend.library_state,
+                input, output, indices,
+                pool_size, pool_size,  # kernel size
+                w_stride, h_stride,  # stride
+                0, 0,  # padding
+                1, 1,  # dilation
+                False)
+            output = output.view(batch_size, num_features, -1)
+
+            all_output.append(output)
+            all_indices.append(indices)
+
+        all_output = cat(all_output, 2)
+        region_norms = all_output.norm(2,1).expand_as(all_output) + eps
+        all_output = all_output.div(region_norms).sum(2).squeeze(2)
+        self.all_indices = all_indices
+
+        # Necessary as the output becomes 1 everywhere when dividing by
+        # torch.norm(output, 2, 0) if batchsize is one
+        if batch_size == 1:
+            batch_norm = all_output.norm(2) + eps
+        else:
+            batch_norm = all_output.norm(2, 0).expand_as(all_output) + eps
+        return all_output / batch_norm
+
+    def backward(self, all_grad_output):
+        input, = self.saved_tensors
+        input_height, input_width = input.size(2), input.size(3)
+        small_edge = min(input_height, input_width)
+        w_steps, h_steps = self._ratio2regions(input_height, input_width)
+        levels = self.levels
+
+        all_grad_output = all_grad_output.unsqueeze(2).unsqueeze(2)
+        backend = type2backend[type(input)]
+        all_indices = self.all_indices
+        all_grad_input = all_grad_output.new()
+
+        for level in range(levels):
+            grad_input = all_grad_output.new()
+            indices = all_indices[level]
+            grad_output = all_grad_output.expand_as(indices)
+            pool_size = 2 * small_edge // (level + 2)
+            w_stride = (input_width - pool_size) // (level + w_steps or inf)
+            w_stride = w_stride or pool_size
+            h_stride = (input_height - pool_size) // (level + h_steps or inf)
+            h_stride = h_stride or pool_size
+            backend.SpatialDilatedMaxPooling_updateGradInput(
+                backend.library_state,
+                input, grad_output, grad_input, indices,
+                pool_size, pool_size,  # kernel size
+                w_stride, h_stride,  # stride
+                0, 0,  # padding
+                1, 1,  # dilation
+                False)
+            if all_grad_input.dim() == 0:
+                all_grad_input = grad_input
+            else:
+                all_grad_input += grad_input
+        return all_grad_input
+
 
 _all_functions.append(AvgPool2d)
 _all_functions.append(AvgPool3d)
@@ -790,3 +1056,7 @@ _all_functions.append(Mac1d)
 _all_functions.append(Mac2d)
 _all_functions.append(Rmac1d)
 _all_functions.append(Rmac2d)
+_all_functions.append(Aac1d)
+_all_functions.append(Aac2d)
+_all_functions.append(Raac1d)
+_all_functions.append(Raac2d)

@@ -372,6 +372,20 @@ def rmac2d(input, levels=3, overlap=0.4):
         return _functions.thnn.Mac2d()(input)
     return _functions.thnn.Rmac2d(levels, overlap)(input)
 
+
+def raac1d(input, levels=3, overlap=0.4):
+    assert isinstance(levels, int) and levels > 0, "Levels must be a positive integer."
+    if levels == 1:
+        return _functions.thnn.Aac1d()(input)
+    return _functions.thnn.Raac1d(levels, overlap)(input)
+
+
+def raac2d(input, levels=3, overlap=0.4):
+    assert isinstance(levels, int) and levels > 0, "Levels must be a positive integer."
+    if levels == 1:
+        return _functions.thnn.Aac2d()(input)
+    return _functions.thnn.Raac2d(levels, overlap)(input)
+
 # Activation functions
 
 def dropout(input, p=0.5, training=False, inplace=False):
