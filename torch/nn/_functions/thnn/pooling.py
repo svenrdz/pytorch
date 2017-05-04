@@ -613,8 +613,8 @@ class Rmac1d(Function):
                 False)
             # output = output.view(batch_size, num_features, -1)
 
-            all_output.append(output)
             all_indices.append(indices)
+            all_output.append(output)
 
         all_output = cat(all_output, 2)
         region_norms = all_output.norm(2,1).expand_as(all_output) + eps
@@ -719,10 +719,10 @@ class Rmac2d(Function):
                 0, 0,  # padding
                 1, 1,  # dilation
                 False)
-            output = output.view(batch_size, num_features, -1)
 
-            all_output.append(output)
             all_indices.append(indices)
+            output = output.view(batch_size, num_features, -1)
+            all_output.append(output)
 
         all_output = cat(all_output, 2)
         region_norms = all_output.norm(2,1).expand_as(all_output) + eps
@@ -815,7 +815,7 @@ class Aac2d(Function):
         self.save_for_backward(input)
         backend.SpatialAveragePooling_updateOutput(
             backend.library_state,
-            input, output, indices,
+            input, output,
             pool_size, pool_size,  # kernel size
             pool_size, pool_size,  # stride
             0, 0,  # padding
@@ -951,6 +951,7 @@ class Raac2d(Function):
 
         backend = type2backend[type(input)]
         all_output = []
+        all_sizes = []
         self.save_for_backward(input)
 
         for level in range(levels):
@@ -967,8 +968,9 @@ class Raac2d(Function):
                 w_stride, h_stride,  # stride
                 0, 0,  # padding
                 False, False)
-            output = output.view(batch_size, num_features, -1)
 
+            all_sizes.append(output.size())
+            output = output.view(batch_size, num_features, -1)
             all_output.append(output)
 
         all_output = cat(all_output, 2)
@@ -989,6 +991,7 @@ class Raac2d(Function):
         small_edge = min(input_height, input_width)
         w_steps, h_steps = self._ratio2regions(input_height, input_width)
         levels = self.levels
+        sizes = self.sizes
 
         all_grad_output = all_grad_output.unsqueeze(2).unsqueeze(2)
         backend = type2backend[type(input)]
@@ -996,7 +999,7 @@ class Raac2d(Function):
 
         for level in range(levels):
             grad_input = all_grad_output.new()
-            grad_output = all_grad_output.expand_as(indices)
+            grad_output = all_grad_output.expand_as(sizes)
             pool_size = 2 * small_edge // (level + 2)
             w_stride = (input_width - pool_size) // (level + w_steps or inf)
             w_stride = w_stride or pool_size
