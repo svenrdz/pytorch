@@ -121,7 +121,7 @@ static auto view3d(const Tensor& tensor) -> std::unique_ptr<Tensor> {
 }
 
 auto ConvForward::apply(const variable_list& inputs) -> variable_list {
-  if (inputs.size() != 3) throw std::runtime_error("expected three inputs");
+  check_input_variables("ConvNd", inputs, 3, 2);
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
 
@@ -200,13 +200,13 @@ auto ConvForward::apply(const variable_list& inputs) -> variable_list {
 };
 
 auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
-  if (grad_outputs.size() != 1) throw std::runtime_error("expected one grad_output");
+  check_input_variables("ConvNdBackward", grad_outputs, 1);
   if (is_padding_neg()) throw std::runtime_error("negative padding is not supported");
   if (is_output_padding_neg()) throw std::runtime_error("negative output_padding is not supported");
 
-  AutoGPU guard(input_.data->getDevice());
-
-  auto input = input_.unpack_data()->contiguous();
+  auto input = input_.unpack_data();
+  AutoGPU guard(input->getDevice());
+  input = input->contiguous();
   std::unique_ptr<Tensor> weight(weight_.unpack_data()->clone_shallow());
   auto bias = bias_.unpack_data();
   auto grad_output = grad_outputs[0]->data->contiguous();
@@ -307,10 +307,12 @@ auto ConvBackward::apply(const variable_list& grad_outputs) -> variable_list {
   }
 
   if (k == 3) {
-    if (should_compute_output(0)) {
-        grad_input = view3d(*grad_input);
+    if (grad_input) {
+      grad_input = view3d(*grad_input);
     }
-    grad_weight = view3d(*grad_weight);
+    if (grad_weight) {
+      grad_weight = view3d(*grad_weight);
+    }
   }
 
   auto outputs =  as_tensor_list(std::move(grad_input),

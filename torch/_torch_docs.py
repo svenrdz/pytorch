@@ -343,8 +343,8 @@ Args:
 
 Example::
 
-    >>> vec1 = torch.arange(1, 3)
-    >>> vec2 = torch.arange(1, 2)
+    >>> vec1 = torch.arange(1, 4)
+    >>> vec2 = torch.arange(1, 3)
     >>> M = torch.zeros(3, 2)
     >>> torch.addr(M, vec1, vec2)
      1  2
@@ -1397,9 +1397,15 @@ Gathers values along an axis specified by `dim`.
 
 For a 3-D tensor the output is specified by::
 
-    out[i][j][k] = input[index[i][j][k]][j][k]  # dim=0
-    out[i][j][k] = input[i][index[i][j][k]][k]  # dim=1
-    out[i][j][k] = input[i][j][index[i][j][k]]  # dim=2
+    out[i][j][k] = input[index[i][j][k]][j][k]  # if dim == 0
+    out[i][j][k] = input[i][index[i][j][k]][k]  # if dim == 1
+    out[i][j][k] = input[i][j][index[i][j][k]]  # if dim == 2
+
+If :attr:`input` is an n-dimensional tensor with size
+:math:`(x_0, x_1..., x_{i-1}, x_i, x_{i+1}, ..., x_{n-1})`
+and :attr:`dim` = i, then :attr:`index` must be an n-dimensional tensor with size
+:math:`(x_0, x_1, ..., x_{i-1}, y, x_{i+1}, ..., x_{n-1})` where y >= 1 and
+:attr:`out` will have the same size as :attr:`index`.
 
 Args:
     input (Tensor): The source tensor
@@ -2137,7 +2143,7 @@ Example::
 .. function:: max(input, dim, keepdim=True, max=None, max_indices=None) -> (Tensor, LongTensor)
 
 Returns the maximum value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
-Also returns the index location of each maximum value found.
+The second return value is the index location of each maximum value found (argmax).
 
 If :attr:`keepdim` is true, the output Tensors are of the same size as :attr:`input`
 except in the dimension :attr:`dim` where they are of size 1.  Otherwise, :attr:`dim`
@@ -2373,7 +2379,7 @@ Example::
 .. function:: min(input, dim, keepdim=True, min=None, min_indices=None) -> (Tensor, LongTensor)
 
 Returns the minimum value of each row of the :attr:`input` Tensor in the given dimension :attr:`dim`.
-Also returns the index location of each minimum value found.
+The second return value is the index location of each minimum value found (argmin).
 
 If :attr:`keepdim` is true, the output Tensors are of the same size as :attr:`input`
 except in the dimension :attr:`dim` where they are of size 1.  Otherwise, :attr:`dim`
