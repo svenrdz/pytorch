@@ -1,16 +1,18 @@
 #pragma once
 
 // Function is an abstract class that represents a single operation from one or
-// more variables to one more or varaibles.
+// more variables to one more or variables.
 //
 // Subclasses may represent "forward" or "backward" operations (i.e functions
 // and their derivatives). Some functions may be used as both.
 
-#include <memory>
-#include <THPP/THPP.h>
-#include <vector>
-
+#include <Python.h>
 #include "torch/csrc/autograd/function_hook.h"
+
+#include <THPP/THPP.h>
+
+#include <memory>
+#include <vector>
 
 namespace torch { namespace autograd {
 
@@ -31,6 +33,7 @@ struct FunctionFlags {
   bool is_executable = false;
   bool is_volatile = false;
   // What functions take the output of this function as input.
+  // There is one function per output of this function.
   function_list next_functions;
 };
 

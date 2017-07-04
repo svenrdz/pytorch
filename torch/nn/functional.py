@@ -1,12 +1,16 @@
 """Functional interface"""
 
 from numbers import Integral
+import warnings
+import math
 
 import torch
 from . import _functions
 from .modules import utils
+from ._functions.linear import Bilinear
 from ._functions.padding import ConstantPad2d
 from ..autograd import _functions as _autograd_functions
+from torch.autograd import Variable
 from .modules.utils import _single, _pair, _triple
 
 # Convolutions
@@ -38,6 +42,9 @@ def conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         >>> inputs = autograd.Variable(torch.randn(1,4,5,5))
         >>> F.conv2d(inputs, filters, padding=1)
     """
+    if input is not None and input.dim() != 4:
+        raise ValueError("Expected 4D tensor as input, got {}D tensor instead.".format(input.dim()))
+
     f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), False,
                _pair(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
@@ -66,6 +73,9 @@ def conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50))
         >>> F.conv1d(inputs, filters)
     """
+    if input is not None and input.dim() != 3:
+        raise ValueError("Expected 3D tensor as input, got {}D tensor instead.".format(input.dim()))
+
     f = ConvNd(_single(stride), _single(padding), _single(dilation), False,
                _single(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
@@ -95,6 +105,10 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
         >>> inputs = autograd.Variable(torch.randn(20, 16, 50, 10, 20))
         >>> F.conv3d(inputs, filters)
     """
+
+    if input is not None and input.dim() != 5:
+        raise ValueError("Expected 5D tensor as input, got {}D tensor instead.".format(input.dim()))
+
     f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), False,
                _triple(0), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
@@ -102,6 +116,26 @@ def conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1,
 
 def conv_transpose1d(input, weight, bias=None, stride=1, padding=0,
                      output_padding=0, groups=1, dilation=1):
+    """Applies a 1D transposed convolution operator over an input signal
+    composed of several input planes, sometimes also called "deconvolution".
+
+    See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
+
+    Args:
+        input: input tensor of shape (minibatch x in_channels x iW)
+        weight: filters of shape (in_channels x out_channels x kW)
+        bias: optional bias of shape (out_channels)
+        stride: the stride of the convolving kernel. Default: 1
+        padding: implicit zero padding on the input. Default: 0
+        groups: split input into groups, in_channels should be divisible by
+          the number of groups
+        output_padding: A zero-padding of 0 <= padding < stride that should be
+          added to the output. Default: 0
+        dilation: the spacing between kernel elements. Default: 1
+    """
+    if input is not None and input.dim() != 3:
+        raise ValueError("Expected 3D tensor as input, got {}D tensor instead.".format(input.dim()))
+
     f = ConvNd(_single(stride), _single(padding), _single(dilation), True,
                _single(output_padding),
                groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
@@ -129,6 +163,10 @@ def conv_transpose2d(input, weight, bias=None, stride=1, padding=0,
           added to the output. Can be a single number or a tuple. Default: 0
         dilation: the spacing between kernel elements. Default: 1
     """
+
+    if input is not None and input.dim() != 4:
+        raise ValueError("Expected 4D tensor as input, got {}D tensor instead.".format(input.dim()))
+
     f = ConvNd(_pair(stride), _pair(padding), _pair(dilation), True,
                _pair(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
@@ -155,6 +193,9 @@ def conv_transpose3d(input, weight, bias=None, stride=1, padding=0,
           the number of groups
         dilation: the spacing between kernel elements. Default: 1
     """
+    if input is not None and input.dim() != 5:
+        raise ValueError("Expected 5D tensor as input, got {}D tensor instead.".format(input.dim()))
+
     f = ConvNd(_triple(stride), _triple(padding), _triple(dilation), True,
                _triple(output_padding), groups, torch.backends.cudnn.benchmark, torch.backends.cudnn.enabled)
     return f(input, weight, bias)
@@ -391,7 +432,38 @@ def raac2d(input, levels=3, overlap=0.4):
 # Activation functions
 
 def dropout(input, p=0.5, training=False, inplace=False):
-    return _functions.dropout.Dropout(p, training, inplace)(input)
+    return _functions.dropout.Dropout.apply(input, p, training, inplace)
+
+
+def alpha_dropout(input, p=0.5, training=False):
+    r"""Applies alpha dropout to the input.
+
+    See :class:`~torch.nn.AlphaDropout` for details.
+
+    Args:
+        p (float, optional): the drop probability
+        training (bool, optional): switch between training and evaluation mode
+    """
+    if p < 0 or p > 1:
+        raise ValueError("dropout probability has to be between 0 and 1, "
+                         "but got {}".format(p))
+
+    if p == 0 or not training:
+        return input
+
+    alpha = -1.7580993408473766
+    keep_prob = 1 - p
+    # TODO avoid casting to byte after resize
+    noise = input.data.new().resize_(input.size())
+    noise.bernoulli_(p)
+    noise = Variable(noise.byte())
+
+    output = input.masked_fill(noise, alpha)
+
+    a = (keep_prob + alpha ** 2 * keep_prob * (1 - keep_prob)) ** (-0.5)
+    b = -a * alpha * (1 - keep_prob)
+
+    return output.mul_(a).add_(b)
 
 
 def threshold(input, threshold, value, inplace=False):
@@ -400,6 +472,16 @@ def threshold(input, threshold, value, inplace=False):
 
 def relu(input, inplace=False):
     return _functions.thnn.Threshold.apply(input, 0, 0, inplace)
+
+
+def glu(input, dim=-1):
+    ndim = input.dim()
+    if dim < -ndim or dim >= ndim:
+        raise IndexError("dim {} is out of range for tensor of dimension {}"
+                         .format(dim, ndim))
+    if dim < 0:
+        dim += ndim
+    return _functions.thnn.GatedLinear(dim)(input)
 
 
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
@@ -414,8 +496,12 @@ def elu(input, alpha=1., inplace=False):
     return _functions.thnn.auto.ELU(alpha, inplace)(input)
 
 
+def selu(input, inplace=False):
+    return _functions.thnn.SELU.apply(input, inplace)
+
+
 def leaky_relu(input, negative_slope=1e-2, inplace=False):
-    return _functions.thnn.auto.LeakyReLU(negative_slope, inplace)(input)
+    return _functions.thnn.LeakyReLU.apply(input, negative_slope, inplace)
 
 
 def prelu(input, weight):
@@ -473,18 +559,21 @@ def sigmoid(input):
 # etc.
 
 def linear(input, weight, bias=None):
-    if bias is None:
-        return _functions.linear.Linear.apply(input, weight)
-    else:
-        return _functions.linear.Linear.apply(input, weight, bias)
+    if input.dim() == 2 and bias is not None:
+        # fused op is marginally faster
+        return torch.addmm(bias, input, weight.t())
+
+    output = input.matmul(weight.t())
+    if bias is not None:
+        output += bias
+    return output
 
 
 def bilinear(input1, input2, weight, bias=None):
-    state = _functions.linear.Bilinear()
     if bias is None:
-        return state(input1, input2, weight)
+        return Bilinear.apply(input1, input2, weight)
     else:
-        return state(input1, input2, weight, bias)
+        return Bilinear.apply(input1, input2, weight, bias)
 
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
@@ -495,7 +584,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
 
 # loss
 
-def nll_loss(input, target, weight=None, size_average=True):
+def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100):
     r"""The negative log likelihood loss.
 
     See :class:`~torch.nn.NLLLoss` for details.
@@ -504,14 +593,13 @@ def nll_loss(input, target, weight=None, size_average=True):
         input: :math:`(N, C)` where `C = number of classes` or `(N, C, H, W)` in case of 2D - Loss
         target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
         weight (Variable, optional): a manual rescaling weight given to each
-                class. If given, has to be a Variable of size "nclasses"
+            class. If given, has to be a Variable of size "nclasses"
         size_average (bool, optional): By default, the losses are averaged
-                over observations for each minibatch. However, if the field
-                sizeAverage is set to False, the losses are instead summed
-                for each minibatch.
-
-    Attributes:
-        weight: the class-weights given as input to the constructor
+            over observations for each minibatch. If size_average
+            is False, the losses are summed for each minibatch.
+        ignore_index (int, optional): Specifies a target value that is ignored
+            and does not contribute to the input gradient. When size_average is
+            True, the loss is averaged over non-ignored targets.
 
     Example:
         >>> # input is of size nBatch x nClasses = 3 x 5
@@ -523,12 +611,45 @@ def nll_loss(input, target, weight=None, size_average=True):
     """
     dim = input.dim()
     if dim == 2:
-        f = _functions.thnn.NLLLoss(size_average, weight=weight)
+        f = _functions.thnn.NLLLoss(size_average, ignore_index, weight=weight)
     elif dim == 4:
+        if ignore_index != -100:
+            raise ValueError('ignore_index is not supported for 4-D inputs')
         f = _functions.thnn.NLLLoss2d(size_average, weight=weight)
     else:
         raise ValueError('Expected 2 or 4 dimensions (got {})'.format(dim))
     return f(input, target)
+
+
+def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True):
+    r"""Poisson negative log likelihood loss.
+
+    See :class:`~torch.nn.PoissonNLLLoss` for details.
+
+    Args:
+        input: expectation of underlying Poisson distribution.
+        target: random sample :math:`target \sim Pois(input)`.
+        log_input: if True the loss is computed as
+            `exp(input) - target * input`, if False then loss is
+            `input - target * log(input)`.
+        full: whether to compute full loss, i. e. to add the Stirling
+            approximation term
+            `target * log(target) - target + 0.5 * log(2 * pi * target)`.
+        size_average: By default, the losses are averaged over observations for
+            each minibatch. However, if the field sizeAverage is set to False,
+            the losses are instead summed for each minibatch.
+    """
+    if log_input:
+        loss = torch.exp(input) - target * input
+    else:
+        loss = input - target * torch.log(input)
+    if full:
+        mask = target > 1
+        loss[mask] += (target * torch.log(target) - target + 0.5 * torch.log(2 * math.pi * target))[mask]
+    if size_average:
+        return torch.mean(loss)
+    else:
+        return torch.sum(loss)
 
 
 def kl_div(input, target, size_average=True):
@@ -545,8 +666,8 @@ def kl_div(input, target, size_average=True):
     return _functions.thnn.KLDivLoss(size_average)(input, target)
 
 
-def cross_entropy(input, target, weight=None, size_average=True):
-    r"""This criterion combines `log_softmax` and `nll_loss` in one single class.
+def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-100):
+    r"""This criterion combines `log_softmax` and `nll_loss` in a single function.
 
     See :class:`torch.nn.CrossEntropyLoss` for details.
 
@@ -560,7 +681,7 @@ def cross_entropy(input, target, weight=None, size_average=True):
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch.
     """
-    return nll_loss(log_softmax(input), target, weight, size_average)
+    return nll_loss(log_softmax(input), target, weight, size_average, ignore_index)
 
 
 def binary_cross_entropy(input, target, weight=None, size_average=True):
@@ -579,7 +700,44 @@ def binary_cross_entropy(input, target, weight=None, size_average=True):
                 sizeAverage is set to False, the losses are instead summed
                 for each minibatch.
     """
+    if not target.is_same_size(input):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()))
+
     return _functions.thnn.BCELoss(size_average, weight=weight)(input, target)
+
+
+def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True):
+    r"""Function that measures Binary Cross Entropy between target and output logits:
+
+    See :class:`~torch.nn.BCEWithLogitsLoss` for details.
+
+    Args:
+        input: Variable of arbitrary shape
+        target: Variable of the same shape as input
+        weight (Variable, optional): a manual rescaling weight
+                if provided it's repeated to match input tensor shape
+        size_average (bool, optional): By default, the losses are averaged
+                over observations for each minibatch. However, if the field
+                sizeAverage is set to False, the losses are instead summed
+                for each minibatch.
+    """
+    if not target.is_same_size(input):
+        raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
+
+    if weight is not None and target.dim() != 1:
+        weight = weight.view(1, target.size(1)).expand_as(target)
+
+    neg_abs = - input.abs()
+    loss = input.clamp(min=0) - input * target + (1 + neg_abs.exp()).log()
+
+    if weight is not None:
+        loss = loss * weight
+
+    if size_average:
+        return loss.mean()
+    else:
+        return loss.sum()
 
 
 def smooth_l1_loss(input, target, size_average=True):
@@ -617,44 +775,76 @@ def pixel_shuffle(input, upscale_factor):
     return shuffle_out.view(batch_size, channels, out_height, out_width)
 
 
-def upsample_nearest(input, size=None, scale_factor=None):
-    """Upsamples the input, using nearest neighbours' pixel values.
+def upsample(input, size=None, scale_factor=None, mode='nearest'):
+    """Upsamples the input to either the given :attr:`size` or the given :attr:`scale_factor`
 
-    Currently only spatial upsampling is supported (i.e. expected inputs
-    are 4 dimensional).
+    The algorithm used for upsampling is determined by :attr:`mode`.
+
+    Currently spatial and volumetric upsampling are supported, i.e.
+    expected inputs are 4-D or 5-D in shape.
+
+    The input dimensions are interpreted in the form: `mini-batch x channels x [depth] x height x width`
+
+    The modes available for upsampling are: `nearest`, `bilinear` (4D-only), `trilinear` (5D-only)
 
     Args:
         input (Variable): input
-        size (int or Tuple[int, int]): output spatial size.
+        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatial size.
+        scale_factor (int): multiplier for spatial size. Has to be an integer.
+        mode (string): algorithm used for upsampling: 'nearest' | 'bilinear' | 'trilinear'
+    """
+    if input.dim() == 4 and mode == 'nearest':
+        return _functions.thnn.UpsamplingNearest2d(_pair(size), scale_factor)(input)
+    elif input.dim() == 5 and mode == 'nearest':
+        return _functions.thnn.UpsamplingNearest3d(_triple(size), scale_factor)(input)
+    elif input.dim() == 4 and mode == 'bilinear':
+        return _functions.thnn.UpsamplingBilinear2d(_pair(size), scale_factor)(input)
+    elif input.dim() == 4 and mode == 'trilinear':
+        raise NotImplementedError("Got 4D input, but trilinear mode needs 5D input")
+    elif input.dim() == 5 and mode == 'bilinear':
+        raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
+    elif input.dim() == 5 and mode == 'trilinear':
+            return _functions.thnn.UpsamplingTrilinear3d(_triple(size), scale_factor)(input)
+    else:
+        raise NotImplementedError("Input Error: Only 4D and 5D input Tensors supported"
+                                  " (got {}D) for the modes: nearest | bilinear | trilinear"
+                                  " (got {})".format(input.dim(), mode))
+
+
+def upsample_nearest(input, size=None, scale_factor=None):
+    """Upsamples the input, using nearest neighbours' pixel values.
+
+    **Note:: This function is deprecated. Use nn.functional.upsample instead**
+
+    Currently spatial and volumetric upsampling are supported (i.e. expected inputs
+    are 4 or 5 dimensional).
+
+    Args:
+        input (Variable): input
+        size (int or Tuple[int, int] or Tuple[int, int, int]): output spatial size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
     """
-    return _functions.thnn.UpsamplingNearest2d(size, scale_factor)(input)
+    # DeprecationWarning is ignored by default
+    warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.upsample instead.")
+    return upsample(input, size, scale_factor, mode='nearest')
 
 
 def upsample_bilinear(input, size=None, scale_factor=None):
-    """Upscales the input, using the bilinear upsampling.
+    """Upscales the input, using bilinear upsampling.
 
-    Currently only spatial upsampling is supported (i.e. expected inputs
-    are 4 dimensional).
+    **Note:: This function is deprecated. Use nn.functional.upsample instead**
+
+    Expected inputs are spatial (4 dimensional). Use upsample_trilinear for volumetric (5 dimensional)
+    inputs.
 
     Args:
         input (Variable): input
         size (int or Tuple[int, int]): output spatial size.
         scale_factor (int or Tuple[int, int]): multiplier for spatial size
     """
-    return _functions.thnn.UpsamplingBilinear2d(size, scale_factor)(input)
-
-
-def _check_bilinear_2d_scale_factor(scale_factor):
-    scale_factor = _pair(scale_factor)
-    try:
-        assert len(scale_factor) == 2
-        assert all(isinstance(s, Integral) and s >= 1 for s in scale_factor)
-    except AssertionError as e:
-        raise ValueError('scale_factor must be a non-negative integer, '
-                         'or a tuple of non-negative integers for bilinear upsamplings, but got: '
-                         '{}'.format(scale_factor))
-    return scale_factor
+    # DeprecationWarning is ignored by default
+    warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.upsample instead.")
+    return upsample(input, size, scale_factor, mode='bilinear')
 
 
 def pad(input, pad, mode='constant', value=0):
@@ -673,7 +863,7 @@ def pad(input, pad, mode='constant', value=0):
     if input.dim() == 4:
         assert len(pad) == 4, '4D tensors expect 4 values for padding'
         if mode == 'constant':
-            return ConstantPad2d(pad, value)(input)
+            return ConstantPad2d.apply(input, pad, value)
         elif mode == 'reflect':
             return _functions.thnn.ReflectionPad2d(*pad)(input)
         elif mode == 'replicate':
@@ -723,6 +913,9 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6):
 def cosine_similarity(x1, x2, dim=1, eps=1e-8):
     r"""Returns cosine similarity between x1 and x2, computed along dim.
 
+    .. math ::
+        \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
+
     Args:
         x1 (Variable): First input.
         x2 (Variable): Second input (of size matching x1).
@@ -732,6 +925,11 @@ def cosine_similarity(x1, x2, dim=1, eps=1e-8):
     Shape:
         - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
         - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
+
+    >>> input1 = autograd.Variable(torch.randn(100, 128))
+    >>> input2 = autograd.Variable(torch.randn(100, 128))
+    >>> output = F.cosine_similarity(input1, input2)
+    >>> print(output)
     """
     w12 = torch.sum(x1 * x2, dim)
     w1 = torch.norm(x1, 2, dim)
