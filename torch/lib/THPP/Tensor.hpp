@@ -12,6 +12,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
+#include <cstring>
 
 namespace thpp {
 
@@ -30,6 +31,8 @@ struct Tensor {
   virtual Tensor* newNarrow(int dimension, long firstIndex, long size) const = 0;
   virtual Tensor* newTranspose(int dimension1, int dimension2) const = 0;
   virtual Tensor* newUnfold(int dimension, long size, long step) const = 0;
+  virtual Tensor* newExpand(const long_range& size) const = 0;
+  virtual Tensor* newView(const long_range& size) const = 0;
 
   virtual int nDim() const = 0;
   virtual long_range sizes() const = 0;
@@ -222,6 +225,7 @@ struct TensorScalarInterface : public Tensor {
   virtual scalar_type dot(const Tensor& source) = 0;
   virtual scalar_type minall() = 0;
   virtual scalar_type maxall() = 0;
+  virtual scalar_type medianall() = 0;
   virtual scalar_type sumall() = 0;
   virtual scalar_type prodall() = 0;
   virtual TensorScalarInterface& add(const Tensor& src, scalar_type value) = 0;

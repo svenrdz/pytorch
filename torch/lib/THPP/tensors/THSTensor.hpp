@@ -47,6 +47,8 @@ public:
   virtual THSTensor* newNarrow(int dimension, long firstIndex, long size) const override;
   virtual THSTensor* newTranspose(int dimension1, int dimension2) const override;
   virtual THSTensor* newUnfold(int dimension, long size, long step) const override;
+  virtual THSTensor* newExpand(const long_range& size) const override;
+  virtual THSTensor* newView(const long_range& size) const override;
 
   virtual int nDim() const override;
   virtual long_range sizes() const override;
@@ -246,6 +248,7 @@ public:
   virtual scalar_type dot(const Tensor& source) override;
   virtual scalar_type minall() override;
   virtual scalar_type maxall() override;
+  virtual scalar_type medianall() override;
   virtual scalar_type sumall() override;
   virtual scalar_type prodall() override;
   virtual THSTensor& neg(const Tensor& src) override;

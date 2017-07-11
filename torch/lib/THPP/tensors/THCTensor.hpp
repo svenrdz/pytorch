@@ -46,6 +46,8 @@ public:
   virtual THCTensor* newNarrow(int dimension, long firstIndex, long size) const override;
   virtual THCTensor* newTranspose(int dimension1, int dimension2) const override;
   virtual THCTensor* newUnfold(int dimension, long size, long step) const override;
+  virtual THCTensor* newExpand(const long_range& size) const override;
+  virtual THCTensor* newView(const long_range& size) const override;
 
   virtual int nDim() const override;
   virtual long_range sizes() const override;
@@ -248,6 +250,7 @@ public:
   virtual scalar_type dot(const Tensor& source) override;
   virtual scalar_type minall() override;
   virtual scalar_type maxall() override;
+  virtual scalar_type medianall() override;
   virtual scalar_type sumall() override;
   virtual scalar_type prodall() override;
   virtual THCTensor& neg(const Tensor& src) override;

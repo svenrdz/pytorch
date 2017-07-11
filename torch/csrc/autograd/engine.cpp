@@ -34,6 +34,9 @@ namespace torch { namespace autograd {
 struct FunctionTask {
   GraphTask* base;
   std::shared_ptr<Function> fn;
+  // This buffer serves as an implicit "addition" node for all of the
+  // gradients flowing here.  Once all the dependencies are finished, we
+  // use the contents of this buffer to run the function.
   InputBuffer inputs;
 
   FunctionTask(GraphTask* base, std::shared_ptr<Function> fn, InputBuffer inputs)
@@ -104,6 +107,7 @@ Engine::Engine() : ready_queues() {
 Engine::~Engine() = default;
 
 auto Engine::thread_main(std::shared_ptr<ReadyQueue> queue) -> void {
+  THInferNumThreads();
   while (1) {
     FunctionTask task = queue->pop_back();
     if (!task.base->has_error.load()) {
@@ -273,11 +277,29 @@ auto Engine::compute_dependencies(function_queue queue, GraphTask& task) -> void
   }
 }
 
+struct ClearCallbacks {
+  ClearCallbacks(std::vector<std::function<void()>>& callbacks,
+                 std::mutex &callbacks_lock)
+    : callbacks(callbacks)
+    , callbacks_lock(callbacks_lock) { clear(); }
+  ~ClearCallbacks() { clear(); }
+
+  void clear() {
+    std::lock_guard<std::mutex> lock(callbacks_lock);
+    callbacks.clear();
+  }
+
+  std::vector<std::function<void()>>& callbacks;
+  std::mutex& callbacks_lock;
+};
+
 auto Engine::execute(const function_list& input_roots,
                      variable_list& inputs,
                      bool keep_graph,
                      const callback_map& callbacks) -> void {
   std::call_once(start_threads_flag, &Engine::start_threads, this);
+  // Callbacks are only valid for the duration of this run and should always be cleared
+  ClearCallbacks _cb_guard(post_callbacks, post_callbacks_lock);
 
   GraphTask graph_task(keep_graph, callbacks);
   std::unique_lock<std::mutex> lock(graph_task.mutex);
@@ -317,6 +339,21 @@ auto Engine::execute(const function_list& input_roots,
   if (!graph_task.not_ready.empty()) {
     throw std::runtime_error("could not compute gradients for some functions");
   }
+
+  // Unlocking is necessary, because the callback can register
+  // more callbacks (or they can be registered from other threads
+  // while it's waiting.
+  std::unique_lock<std::mutex> cb_lock(post_callbacks_lock);
+  for (std::size_t i = 0; i < post_callbacks.size(); ++i) {
+    cb_lock.unlock();
+    post_callbacks[i]();
+    cb_lock.lock();
+  }
+}
+
+void Engine::queue_callback(std::function<void()> callback) {
+  std::lock_guard<std::mutex> lock(post_callbacks_lock);
+  post_callbacks.emplace_back(std::move(callback));
 }
 
 auto Engine::ready_queue(int device) -> ReadyQueue& {

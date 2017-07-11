@@ -65,6 +65,16 @@ auto THCSTensor<real>::newUnfold(int dimension, long size, long step) const -> T
 }
 
 template<>
+auto THCSTensor<real>::newExpand(const long_range& size) const -> THCSTensor* {
+  throw std::runtime_error("newExpand is not yet available for sparse tensors");
+}
+
+template<>
+auto THCSTensor<real>::newView(const long_range& size) const -> THCSTensor* {
+  throw std::runtime_error("newView is not yet available for sparse tensors");
+}
+
+template<>
 int THCSTensor<real>::nDim() const {
   return tensor->nDimensionI;
 }
@@ -785,6 +795,11 @@ auto THCSTensor<real>::minall() -> scalar_type {
 template<>
 auto THCSTensor<real>::maxall() -> scalar_type {
   throw std::runtime_error("THCSTensor::maxall() not supported");
+}
+
+template<>
+auto THCSTensor<real>::medianall() -> scalar_type {
+  throw std::runtime_error("THCSTensor::medianall() not supported");
 }
 
 template<>

@@ -4,6 +4,7 @@ import torch._C as _C
 from collections import OrderedDict
 import torch.sparse as sparse
 import torch.utils.hooks as hooks
+import warnings
 
 
 class Variable(_C._VariableBase):
@@ -60,7 +61,7 @@ class Variable(_C._VariableBase):
     def __getattr__(self, name):
         if name in self._fallthrough_methods:
             return getattr(self.data, name)
-        raise AttributeError(name)
+        return object.__getattribute__(self, name)
 
     def __getitem__(self, key):
         if torch.is_tensor(key):
@@ -76,7 +77,7 @@ class Variable(_C._VariableBase):
     def __setitem__(self, key, value):
         if isinstance(key, Variable) and type(key.data).__name__ == 'ByteTensor':
             if isinstance(value, Variable):
-                return MaskedCopy.apply(self, key, value, True)
+                return MaskedScatter.apply(self, key, value, True)
             else:
                 return MaskedFill.apply(self, key, value, True)
         else:
@@ -131,22 +132,25 @@ class Variable(_C._VariableBase):
         It should be a tensor of matching type and location, that contains
         the gradient of the differentiated function w.r.t. ``self``.
 
-        This function accumulates gradients in the leaves - you might need to zero
-        them before calling it.
+        This function accumulates gradients in the leaves - you might need to
+        zero them before calling it.
 
         Arguments:
-        grad_variables (Tensor, Variable or None): Gradient w.r.t. the variable.
-            If it is a tensor, it will be automatically converted to a Variable
-            that is volatile unless ``create_graph`` is True. None values can be
-            specified for scalar Variables or ones that don't require grad. If a
-            None value would be acceptable then this argument is optional.
-        retain_graph (bool, optional): If False, the graph used to compute the grads
-            will be freed. Note that in nearly all cases setting this option to True
-            is not needed and often can be worked around in a much more efficient
-            way. Defaults to the value of ``create_graph``.
-        create_graph (bool, optional): If true, graph of the derivative will
-            be constructed, allowing to compute higher order derivative products.
-            Defaults to False, unless ``gradient`` is a volatile Variable.
+            grad_variables (Tensor, Variable or None): Gradient w.r.t. the
+                variable. If it is a tensor, it will be automatically converted
+                to a Variable that is volatile unless ``create_graph`` is True.
+                None values can be specified for scalar Variables or ones that
+                don't require grad. If a None value would be acceptable then
+                this argument is optional.
+            retain_graph (bool, optional): If False, the graph used to compute
+                the grads will be freed. Note that in nearly all cases setting
+                this option to True is not needed and often can be worked around
+                in a much more efficient way. Defaults to the value of
+                ``create_graph``.
+            create_graph (bool, optional): If true, graph of the derivative will
+                be constructed, allowing to compute higher order derivative
+                products. Defaults to False, unless ``gradient`` is a volatile
+                Variable.
         """
         torch.autograd.backward(self, gradient, retain_graph, create_graph, retain_variables)
 
@@ -221,7 +225,9 @@ class Variable(_C._VariableBase):
         return result
 
     def detach_(self):
-        """Detaches the Variable from the graph that created it, making it a leaf."""
+        """Detaches the Variable from the graph that created it, making it a
+        leaf.
+        """
         self._grad_fn = None
         self.requires_grad = False
 
@@ -325,8 +331,9 @@ class Variable(_C._VariableBase):
             return DivConstant.apply(self, other)
 
     def div_(self, other):
-        assert not torch.is_tensor(other)
-        return DivConstant.apply(self, other, True)
+        if not isinstance(other, Variable) and not torch.is_tensor(other):
+            return DivConstant.apply(self, other, True)
+        raise RuntimeError("div_ only supports scalar multiplication")
 
     def pow(self, other):
         if isinstance(other, Variable):
@@ -382,6 +389,9 @@ class Variable(_C._VariableBase):
 
     def atan(self):
         return Atan.apply(self)
+
+    def atan2(self, x):
+        return Atan2.apply(self, x)
 
     def sinh(self):
         return Sinh.apply(self)
@@ -439,33 +449,33 @@ class Variable(_C._VariableBase):
     def rsqrt(self):
         return Rsqrt.apply(self)
 
-    def sum(self, dim=None, keepdim=True):
+    def sum(self, dim=None, keepdim=False):
         return Sum.apply(self, dim, keepdim)
 
-    def prod(self, dim=None, keepdim=True):
+    def prod(self, dim=None, keepdim=False):
         return Prod.apply(self, dim, keepdim)
 
-    def mean(self, dim=None, keepdim=True):
+    def mean(self, dim=None, keepdim=False):
         return Mean.apply(self, dim, keepdim)
 
-    def max(self, dim=None, keepdim=True):
+    def max(self, dim=None, keepdim=False):
         if isinstance(dim, Variable):
             return Cmax.apply(self, dim)
-        return Max(dim, keepdim)(self)
+        return Max.apply(self, dim, keepdim)
 
-    def min(self, dim=None, keepdim=True):
+    def min(self, dim=None, keepdim=False):
         if isinstance(dim, Variable):
             return Cmin.apply(self, dim)
-        return Min(dim, keepdim)(self)
+        return Min.apply(self, dim, keepdim)
 
-    def mode(self, dim, keepdim=True):
-        return Mode(dim, keepdim)(self)
+    def mode(self, dim=None, keepdim=False):
+        return Mode.apply(self, dim, keepdim)
 
-    def median(self, dim, keepdim=True):
-        return Median(dim, keepdim)(self)
+    def median(self, dim=None, keepdim=False):
+        return Median.apply(self, dim, keepdim)
 
-    def kthvalue(self, dim, keepdim=True):
-        return Kthvalue(dim, keepdim)(self)
+    def kthvalue(self, k, dim=None, keepdim=False):
+        return Kthvalue.apply(self, k, dim, keepdim)
 
     def sort(self, dim=None, descending=False):
         return Sort.apply(self, dim, descending, True)
@@ -490,17 +500,20 @@ class Variable(_C._VariableBase):
         return Repeat.apply(self, repeats)
 
     def cumsum(self, dim):
-        return Cumsum(dim)(self)
+        return Cumsum.apply(self, dim)
+
+    def cumprod(self, dim):
+        return Cumprod.apply(self, dim)
 
     def unfold(self, dim, size, step):
         return Unfold.apply(self, dim, size, step)
 
-    def var(self, dim=None, keepdim=True, unbiased=True):
+    def var(self, dim=None, keepdim=False, unbiased=True):
         mean = self.mean(dim, keepdim)
         if dim is None:
             mean = mean.view(*(1 for s in self.size()))
         # we could just set keepdim to True, but this preserves some fidelity
-        elif keepdim is False:
+        elif keepdim is False and self.dim() != 1:
             mean = mean.unsqueeze(dim)
         mean_expanded = mean.expand_as(self)
         zero_centered = self.sub(mean_expanded)
@@ -508,7 +521,7 @@ class Variable(_C._VariableBase):
         numel = self.numel() if dim is None else self.size(dim)
         return var.div(numel - int(unbiased))
 
-    def std(self, dim=None, keepdim=True):
+    def std(self, dim=None, keepdim=False):
         return self.var(dim, keepdim).sqrt()
 
     def renorm(self, p, dim, maxnorm):
@@ -518,6 +531,9 @@ class Variable(_C._VariableBase):
         norms = norms.clamp(max=maxnorm).div(norms.add(1e-7))
         flat_out = flat.mul(norms.expand_as(flat))
         return flat_out.view(t.size()).transpose(dim, 0)
+
+    def matmul(self, other):
+        return torch.matmul(self, other)
 
     @staticmethod
     def _static_blas(cls, args, inplace):
@@ -536,7 +552,7 @@ class Variable(_C._VariableBase):
 
     def mm(self, matrix):
         output = Variable(self.data.new(self.data.size(0), matrix.data.size(1)))
-        return self._static_blas(Addmm, (output, 0, 1, self, matrix), False)
+        return Addmm.apply(output, self, matrix, 0, 1, True)
 
     def bmm(self, batch):
         output = Variable(self.data.new(self.data.size(0), self.data.size(1),
@@ -552,7 +568,7 @@ class Variable(_C._VariableBase):
         return self._static_blas(Addr, (output, 0, 1, self, vector), False)
 
     def resize(self, *sizes):
-        return Resize.apply()(self, sizes)
+        return Resize.apply(self, sizes)
 
     def resize_as(self, variable):
         return Resize.apply(self, variable.size())
@@ -610,7 +626,7 @@ class Variable(_C._VariableBase):
     def addcdiv_(self, *args):
         return self._addcop(Addcdiv, args, True)
 
-    def norm(self, p=2, dim=None, keepdim=True):
+    def norm(self, p=2, dim=None, keepdim=False):
         return Norm.apply(self, p, dim, keepdim)
 
     def dist(self, tensor, p=2):
@@ -618,6 +634,9 @@ class Variable(_C._VariableBase):
 
     def index_add(self, dim, index, tensor):
         return IndexAdd.apply(self, dim, index, tensor)
+
+    def _advanced_index_add(self, index, tensor):
+        return AdvancedIndexAdd.apply(self, index, tensor)
 
     def index_add_(self, dim, index, tensor):
         return IndexAdd.apply(self, dim, index, tensor, True)
@@ -646,11 +665,25 @@ class Variable(_C._VariableBase):
     def scatter_(self, dim, index, source):
         return Scatter.apply(self, dim, index, source, True)
 
+    def scatter_add(self, dim, index, source):
+        return ScatterAdd.apply(self, dim, index, source)
+
+    def scatter_add_(self, dim, index, source):
+        return ScatterAdd.apply(self, dim, index, source, True)
+
     def masked_copy(self, mask, variable):
-        return MaskedCopy.apply(self, mask, variable)
+        warnings.warn("masked_copy is deprecated and renamed to masked_scatter, and will be removed in v0.3")
+        return MaskedScatter.apply(self, mask, variable)
 
     def masked_copy_(self, mask, variable):
-        return MaskedCopy.apply(self, mask, variable, True)
+        warnings.warn("masked_copy_ is deprecated and renamed to masked_scatter_, and will be removed in v0.3")
+        return MaskedScatter.apply(self, mask, variable, True)
+
+    def masked_scatter(self, mask, variable):
+        return MaskedScatter.apply(self, mask, variable)
+
+    def masked_scatter_(self, mask, variable):
+        return MaskedScatter.apply(self, mask, variable, True)
 
     def masked_fill(self, mask, value):
         return MaskedFill.apply(self, mask, value)
@@ -673,6 +706,8 @@ class Variable(_C._VariableBase):
         return Expand.apply(self, tensor.size())
 
     def t(self):
+        if self.dim() != 2:
+            raise RuntimeError("t() expects a 2D Variable, but self is {}D".format(self.dim()))
         return Transpose.apply(self, 0, 1)
 
     def transpose(self, dim1, dim2):
@@ -695,6 +730,9 @@ class Variable(_C._VariableBase):
     def squeeze(self, dim=None):
         return Squeeze.apply(self, dim)
 
+    def squeeze_(self, dim=None):
+        return Squeeze.apply(self, dim, True)
+
     def unsqueeze(self, dim):
         return Unsqueeze.apply(self, dim)
 
@@ -702,19 +740,25 @@ class Variable(_C._VariableBase):
         return Permute.apply(self, permutation)
 
     def diag(self, diagonal_idx=0):
-        return Diag(diagonal_idx)(self)
+        return Diag.apply(self, diagonal_idx)
 
     def tril(self, diagonal_idx=0):
-        return Tril(diagonal_idx)(self)
+        return Tril.apply(self, diagonal_idx)
 
     def triu(self, diagonal_idx=0):
-        return Triu(diagonal_idx)(self)
+        return Triu.apply(self, diagonal_idx)
 
     def trace(self):
-        return Trace()(self)
+        return Trace.apply(self)
 
     def cross(self, other, dim=-1):
-        return Cross(dim)(self, other)
+        return Cross.apply(self, other)
+
+    def inverse(self):
+        return Inverse.apply(self)
+
+    def gesv(self, a):
+        return Gesv.apply(self, a)
 
     def multinomial(self, num_samples=1, with_replacement=False):
         return Multinomial(num_samples, with_replacement)(self)
@@ -770,21 +814,9 @@ class Variable(_C._VariableBase):
         return self.mul_(other)
 
     def __matmul__(self, other):
-        dim_self = self.dim()
-        try:
-            dim_other = other.dim()
-        except AttributeError:  # not a Variable
+        if not isinstance(other, Variable):
             return NotImplemented
-        if dim_self == 1 and dim_other == 1:
-            return self.dot(other)
-        if dim_self == 2 and dim_other == 1:
-            return self.mv(other)
-        if dim_self == 1 and dim_other == 2:
-            return self.unsqueeze(0).mm(other).squeeze(0)
-        elif dim_self == 2 and dim_other == 2:
-            return self.mm(other)
-        raise ValueError("both arguments to __matmul__ need to be 1D or 2D, "
-                         "but they are {}D and {}D".format(dim_self, dim_other))
+        return self.matmul(other)
 
     def __div__(self, other):
         return self.div(other)
