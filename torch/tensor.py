@@ -97,6 +97,14 @@ class _TensorBase(object):
         """
         return self.storage().is_shared()
 
+    @property
+    def shape(self):
+        """Alias for .size()
+
+        Returns a torch.Size object, containing the dimensions of the tensor
+        """
+        return self.size()
+
     def __deepcopy__(self, _memo):
         memo = _memo.setdefault('torch', {})
         if self._cdata in memo:
@@ -146,7 +154,10 @@ class _TensorBase(object):
     __nonzero__ = __bool__
 
     def __iter__(self):
-        return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
+        if self.nelement() > 0:
+            return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
+        else:
+            return iter([])
 
     def split(self, split_size, dim=0):
         """Splits this tensor into a tuple of tensors.
@@ -230,7 +241,8 @@ class _TensorBase(object):
         Unlike :meth:`expand`, this function copies the tensor's data.
 
         Args:
-            *sizes (torch.Size or int...): The number of times to repeat this tensor along each dimension
+            *sizes (torch.Size or int...): The number of times to repeat this
+                tensor along each dimension
 
         Example:
             >>> x = torch.Tensor([1, 2, 3])
@@ -321,6 +333,7 @@ class _TensorBase(object):
 
     def __idiv__(self, other):
         return self.div_(other)
+    __itruediv__ = __idiv__
 
     def __mod__(self, other):
         return self.remainder(other)
@@ -354,6 +367,11 @@ class _TensorBase(object):
 
     def __hash__(self):
         return id(self)
+
+    # provide user guidance when they inavertently call autograd properties on a Tensor
+    @property
+    def data(self):
+        raise RuntimeError('cannot call .data on a torch.Tensor: did you intend to use autograd.Variable?')
 
 
 _TensorBase.type = _type

@@ -31,7 +31,8 @@ INSTALL_DIR="$(pwd)/tmp_install"
 C_FLAGS=" -DTH_INDEX_BASE=0 -I$INSTALL_DIR/include \
   -I$INSTALL_DIR/include/TH -I$INSTALL_DIR/include/THC \
   -I$INSTALL_DIR/include/THS -I$INSTALL_DIR/include/THCS \
-  -I$INSTALL_DIR/include/THPP "
+  -I$INSTALL_DIR/include/THPP -I$INSTALL_DIR/include/THNN \
+  -I$INSTALL_DIR/include/THCUNN"
 LDFLAGS="-L$INSTALL_DIR/lib "
 LD_POSTFIX=".so.1"
 LD_POSTFIX_UNVERSIONED=".so"
@@ -49,11 +50,16 @@ function build() {
   # contain the cmake output
   mkdir -p build/$1
   cd build/$1
+  BUILD_C_FLAGS=''
+  case $1 in
+      THCS | THCUNN ) BUILD_C_FLAGS=$C_FLAGS;;
+      *) BUILD_C_FLAGS=$C_FLAGS" -fexceptions";;
+  esac
   cmake ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
               -DTorch_FOUND="1" \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-              -DCMAKE_C_FLAGS="$C_FLAGS" \
-              -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS" \
+              -DCMAKE_C_FLAGS="$BUILD_C_FLAGS" \
+              -DCMAKE_CXX_FLAGS="$BUILD_C_FLAGS $CPP_FLAGS" \
               -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" \
               -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS" \
               -DCUDA_NVCC_FLAGS="$C_FLAGS" \
@@ -61,6 +67,9 @@ function build() {
               -DTH_LIB_PATH="$INSTALL_DIR/lib" \
               -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
               -DTHPP_LIBRARIES="$INSTALL_DIR/lib/libTHPP$LD_POSTFIX" \
+              -DATEN_LIBRARIES="$INSTALL_DIR/lib/libATen$LD_POSTFIX" \
+              -DTHNN_LIBRARIES="$INSTALL_DIR/lib/libTHNN$LD_POSTFIX" \
+              -DTHCUNN_LIBRARIES="$INSTALL_DIR/lib/libTHCUNN$LD_POSTFIX" \
               -DTHS_LIBRARIES="$INSTALL_DIR/lib/libTHS$LD_POSTFIX" \
               -DTHC_LIBRARIES="$INSTALL_DIR/lib/libTHC$LD_POSTFIX" \
               -DTHCS_LIBRARIES="$INSTALL_DIR/lib/libTHCS$LD_POSTFIX" \
@@ -130,6 +139,7 @@ build THPP
 # The shared memory manager depends on TH
 CPP_FLAGS=" -std=c++11 "
 build libshm
+build ATen
 
 # THD, gloo have dependencies on Torch, CUDA, NCCL etc.
 if [[ $WITH_DISTRIBUTED -eq 1 ]]; then
