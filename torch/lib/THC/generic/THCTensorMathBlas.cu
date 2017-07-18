@@ -121,7 +121,7 @@ THCTensor_(addmv)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
 
     THCTensor_(addmm)(state, r_, beta, tAsMatrix, alpha, mat, vecAsMatrix);
 
-    // r_ will have answer as matrix, need to return a vecotr
+    // r_ will have answer as matrix, need to return a vector
     THCTensor_(resize1d)(state, r_, r_->size[0]);
     THCTensor_(free)(state, vecAsMatrix);
     THCTensor_(free)(state, tAsMatrix);
@@ -245,7 +245,9 @@ THCTensor_(addmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
   if(t != r_)
   {
     THCTensor_(resizeAs)(state, r_, t);
-    THCTensor_(copy)(state, r_, t);
+    if (ScalarConvert<real, double>::to(beta) != 0.0) {
+      THCTensor_(copy)(state, r_, t);
+    }
   }
 
   /* r_ */
@@ -402,7 +404,9 @@ THCTensor_(addbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
 
   if (t != result) {
     THCTensor_(resizeAs)(state, result, t);
-    THCTensor_(copy)(state, result, t);
+    if (ScalarConvert<real, double>::to(beta) != 0.0) {
+      THCTensor_(copy)(state, result, t);
+    }
   }
 
   THCTensor *slice1 = THCTensor_(new)(state);
@@ -450,7 +454,9 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
 
   if (t != result) {
     THCTensor_(resizeAs)(state, result, t);
-    THCTensor_(copy)(state, result, t);
+    if (ScalarConvert<real, double>::to(beta) != 0.0) {
+      THCTensor_(copy)(state, result, t);
+    }
   }
 
   bool transpose_result;
@@ -486,13 +492,15 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
     ldc = result_->stride[2];
   }
 
-  if (batch1->stride[transpose_result ? 2 : 1] == 1)
+  if (batch1->stride[transpose_result ? 2 : 1] == 1 && 
+   batch1->stride[transpose_result ? 1 : 2] != 0)
   {
     transpose_batch1 = 'n';
     batch1_ = batch1;
     lda = batch1_->stride[transpose_result ? 1 : 2];
   }
-  else if (batch1->stride[transpose_result ? 1 : 2] == 1)
+  else if (batch1->stride[transpose_result ? 1 : 2] == 1 && 
+   batch1->stride[transpose_result ? 2 : 1] != 0)
   {
     transpose_batch1 = 't';
     batch1_ = batch1;
@@ -505,13 +513,15 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
     lda = batch1_->stride[1];
   }
 
-  if (batch2->stride[transpose_result ? 2 : 1] == 1)
+  if (batch2->stride[transpose_result ? 2 : 1] == 1 && 
+   batch2->stride[transpose_result ? 1 : 2] != 0)
   {
     transpose_batch2 = 'n';
     batch2_ = batch2;
     ldb = batch2_->stride[transpose_result ? 1 : 2];
   }
-  else if (batch2->stride[transpose_result ? 1 : 2] == 1)
+  else if (batch2->stride[transpose_result ? 1 : 2] == 1 &&
+   batch2->stride[transpose_result ? 2 : 1] != 0)
   {
     transpose_batch2 = 't';
     batch2_ = batch2;
@@ -523,7 +533,6 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
     batch2_ = THCTensor_(newContiguous)(state, batch2);
     ldb = batch2_->stride[1];
   }
-
   long num_batches = result_->size[0];
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)

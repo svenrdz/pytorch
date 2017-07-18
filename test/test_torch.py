@@ -202,20 +202,20 @@ class TestTorch(TestCase):
             fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
 
             def fn(t, dim, keepdim=False):
-                ans = fn_attr(x, dim, keepdim)
+                ans = fn_attr(x, dim, keepdim=keepdim)
                 return ans if not isinstance(ans, tuple) else ans[0]
 
             dim = random.randint(0, 2)
-            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, True))
+            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
             self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
-            self.assertEqual(x.ndimension(), fn(x, dim, True).ndimension())
+            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
 
             # check 1-d behavior
             x = torch.randn(1)
             dim = 0
-            self.assertEqual(fn(x, dim), fn(x, dim, True))
+            self.assertEqual(fn(x, dim), fn(x, dim, keepdim=True))
             self.assertEqual(x.ndimension(), fn(x, dim).ndimension())
-            self.assertEqual(x.ndimension(), fn(x, dim, True).ndimension())
+            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
 
     def _testCSelection(self, torchfn, mathfn):
         # Two tensors
@@ -1644,7 +1644,9 @@ class TestTorch(TestCase):
         z = torch.rand(2, 3, 4)
         for dim in range(4):
             res = torch.stack((x, y, z), dim)
+            res_neg = torch.stack((x, y, z), dim - 4)
             expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
+            self.assertEqual(res, res_neg)
             self.assertEqual(res.size(), expected_size)
             self.assertEqual(res.select(dim, 0), x, 0)
             self.assertEqual(res.select(dim, 1), y, 0)
@@ -2881,11 +2883,9 @@ class TestTorch(TestCase):
                 [slice(None), slice(None), [0, 2, 3], [1, 3, 4]],
                 [slice(None), slice(None), [0], [1, 2, 4]],
                 [slice(None), slice(None), [0, 1, 3], [4]],
-                [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
                 [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3]]],
                 [slice(None), slice(None), [[0, 1], [2, 3]], [[0]]],
                 [slice(None), slice(None), [[5, 6]], [[0, 3], [4, 4]]],
-                [slice(None), slice(None), [[2]], [[0, 3], [4, 4]]],
                 [slice(None), [0, 2, 3], [1, 3, 4], slice(None)],
                 [slice(None), [0], [1, 2, 4], slice(None)],
                 [slice(None), [0, 1, 3], [4], slice(None)],
@@ -2925,6 +2925,13 @@ class TestTorch(TestCase):
                 assert_set_eq(reference,
                               indexer,
                               get_set_tensor(reference, indexer))
+            indices_to_test += [
+                [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
+                [slice(None), slice(None), [[2]], [[0, 3], [4, 4]]],
+            ]
+            for indexer in indices_to_test:
+                assert_get_eq(reference, indexer)
+                assert_set_eq(reference, indexer, 1333)
 
     def test_advancedindex(self):
         self._test_advancedindex(self, lambda x: x)
@@ -3181,6 +3188,21 @@ class TestTorch(TestCase):
         bignumber = 2 ^ 31 + 1
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
+
+    def test_unbiased(self):
+        tensor = torch.randn(100)
+        self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
+        self.assertEqual(tensor.var(), tensor.var(unbiased=True))
+        self.assertEqual(tensor.var(unbiased=False), tensor.var(0, unbiased=False)[0])
+
+        tensor = torch.FloatTensor([1.0, 2.0])
+        self.assertEqual(tensor.var(unbiased=True), 0.5)
+        self.assertEqual(tensor.var(unbiased=False), 0.25)
+
+        tensor = torch.randn(100)
+        self.assertEqual(tensor.std(0), tensor.std(0, unbiased=True))
+        self.assertEqual(tensor.std(), tensor.std(unbiased=True))
+        self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False)[0])
 
     def test_view(self):
         tensor = torch.rand(15)
@@ -3654,15 +3676,8 @@ class TestTorch(TestCase):
         b = [a[i % 2] for i in range(4)]
         b += [a[0].storage()]
         b += [a[0].storage()[1:4]]
-        DATA_URL = 'https://download.pytorch.org/test_data/legacy_serialized.pt'
-        data_dir = os.path.join(os.path.dirname(__file__), 'data')
-        test_file_path = os.path.join(data_dir, 'legacy_serialized.pt')
-        succ = download_file(DATA_URL, test_file_path)
-        if not succ:
-            warnings.warn(("Couldn't download the test file for backwards compatibility! "
-                           "Tests will be incomplete!"), RuntimeWarning)
-            return
-        c = torch.load(test_file_path)
+        path = download_file('https://download.pytorch.org/test_data/legacy_serialized.pt')
+        c = torch.load(path)
         self.assertEqual(b, c, 0)
         self.assertTrue(isinstance(c[0], torch.FloatTensor))
         self.assertTrue(isinstance(c[1], torch.FloatTensor))
@@ -3689,7 +3704,6 @@ class TestTorch(TestCase):
             sys.modules[module.__name__] = module
             return module
 
-        import os
         with tempfile.NamedTemporaryFile() as checkpoint:
             fname = os.path.join(os.path.dirname(__file__), 'data/network1.py')
             module = import_module('tmpmodule', fname)
@@ -3713,15 +3727,7 @@ class TestTorch(TestCase):
                 self.assertTrue(w[0].category, 'SourceChangeWarning')
 
     def test_serialization_map_location(self):
-        DATA_URL = 'https://download.pytorch.org/test_data/gpu_tensors.pt'
-        data_dir = os.path.join(os.path.dirname(__file__), 'data')
-        test_file_path = os.path.join(data_dir, 'gpu_tensors.pt')
-        succ = download_file(DATA_URL, test_file_path)
-        if not succ:
-            warnings.warn(
-                "Couldn't download the test file for map_location! "
-                "Tests will be incomplete!", RuntimeWarning)
-            return
+        test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
 
         def map_location(storage, loc):
             return storage
@@ -3750,13 +3756,12 @@ class TestTorch(TestCase):
 
     def test_from_file(self):
         size = 10000
-        filename = 'testPytorchStorageFromFile'
-        try:
-            s1 = torch.FloatStorage.from_file(filename, True, size)
+        with tempfile.NamedTemporaryFile() as f:
+            s1 = torch.FloatStorage.from_file(f.name, True, size)
             t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
 
             # check mapping
-            s2 = torch.FloatStorage.from_file(filename, True, size)
+            s2 = torch.FloatStorage.from_file(f.name, True, size)
             t2 = torch.FloatTensor(s2)
             self.assertEqual(t1, t2, 0)
 
@@ -3769,9 +3774,6 @@ class TestTorch(TestCase):
             rnum = random.uniform(-1, 1)
             t2.fill_(rnum)
             self.assertEqual(t1, t2, 0)
-        finally:
-            if os.path.exists(filename):
-                os.remove(filename)
 
     def test_print(self):
         for t in torch._tensor_classes:
@@ -3965,6 +3967,10 @@ class TestTorch(TestCase):
         expected = torch.arange(1, 126).view(5, 5, 5)[:, 1]
         self.assertEqual(torch.from_numpy(x), expected)
 
+        # check zero dimentional
+        x = np.zeros((0, 2))
+        self.assertRaises(RuntimeError, lambda: torch.from_numpy(x))
+
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_index(self):
         i = np.int32([0, 1, 2])
@@ -4069,6 +4075,13 @@ class TestTorch(TestCase):
         t2 = torch.from_numpy(t.numpy().transpose())
         self.assertEqual(t1, t2)
 
+    def test_inplace_division(self):
+        t = torch.rand(5, 5)
+        id_before = id(t)
+        t /= 2
+        id_after = id(t)
+        self.assertEqual(id_before, id_after)
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
@@ -4132,7 +4145,6 @@ neg_dim_tests = [
     ('index_select', (10, 10), lambda: [DIM_ARG, idx_tensor((10,), 10)], [METHOD, FUNCTIONAL]),
     ('split', (10, 20), lambda: [5, DIM_ARG], [METHOD, FUNCTIONAL]),
     ('squeeze', (10, 1, 20, 1), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL]),
-    ('stack', [(2, 3, 4), (2, 3, 4)], lambda: [DIM_ARG], [FUNCTIONAL]),
     ('unbind', (2, 3, 4), lambda: [DIM_ARG], [FUNCTIONAL]),
     ('unsqueeze', (10, 20), lambda: [DIM_ARG], [METHOD, INPLACE_METHOD, FUNCTIONAL], 1),
     ('cumprod', (10, 20), lambda: [DIM_ARG], [METHOD, FUNCTIONAL]),

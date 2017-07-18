@@ -7,9 +7,10 @@
 namespace at {
 
 struct ${Type} : public Type {
-  ${Type}(Context* context);
+  explicit ${Type}(Context* context);
   virtual ScalarType scalarType() override;
   virtual Backend backend() override;
+  virtual bool isCuda() override;
   virtual bool isSparse() override;
   virtual bool isDistributed() override;
   virtual std::unique_ptr<Storage> storage() override;
