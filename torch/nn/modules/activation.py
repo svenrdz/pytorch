@@ -1,3 +1,4 @@
+import warnings
 import torch
 from torch.nn.parameter import Parameter
 
@@ -16,7 +17,7 @@ class Threshold(Module):
     Args:
         threshold: The value to threshold at
         value: The value to replace with
-        inplace: can optionally do the operation in-place
+        inplace: can optionally do the operation in-place. Default: False
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -54,7 +55,7 @@ class ReLU(Threshold):
     :math:`{ReLU}(x)= max(0, x)`
 
     Args:
-        inplace: can optionally do the operation in-place
+        inplace: can optionally do the operation in-place. Default: False
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -109,9 +110,12 @@ class Hardtanh(Module):
     The range of the linear region :math:`[-1, 1]` can be adjusted
 
     Args:
-        min_value: minimum value of the linear region range
-        max_value: maximum value of the linear region range
-        inplace: can optionally do the operation in-place
+        min_val: minimum value of the linear region range. Default: -1
+        max_val: maximum value of the linear region range. Default: 1
+        inplace: can optionally do the operation in-place. Default: False
+
+    Keyword arguments :attr:`min_value` and :attr:`max_value`
+    have been deprecated in favor of :attr:`min_val` and :attr:`max_val`
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -126,10 +130,17 @@ class Hardtanh(Module):
         >>> print(m(input))
     """
 
-    def __init__(self, min_value=-1, max_value=1, inplace=False):
+    def __init__(self, min_val=-1, max_val=1, inplace=False, min_value=None, max_value=None):
         super(Hardtanh, self).__init__()
-        self.min_val = min_value
-        self.max_val = max_value
+        if min_value is not None:
+            warnings.warn("keyword argument min_value is deprecated and renamed to min_val")
+            min_val = min_value
+        if max_value is not None:
+            warnings.warn("keyword argument max_value is deprecated and renamed to max_val")
+            max_val = max_value
+
+        self.min_val = min_val
+        self.max_val = max_val
         self.inplace = inplace
         assert self.max_val > self.min_val
 
@@ -148,7 +159,7 @@ class ReLU6(Hardtanh):
     """Applies the element-wise function :math:`{ReLU6}(x) = min(max(0,x), 6)`
 
     Args:
-        inplace: can optionally do the operation in-place
+        inplace: can optionally do the operation in-place. Default: False
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -224,8 +235,8 @@ class ELU(Module):
     :math:`f(x) = max(0,x) + min(0, alpha * (exp(x) - 1))`
 
     Args:
-        alpha: the alpha value for the ELU formulation
-        inplace: can optionally do the operation in-place
+        alpha: the alpha value for the ELU formulation. Default: 1.0
+        inplace: can optionally do the operation in-place. Default: False
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -264,7 +275,7 @@ class SELU(Module):
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
     Args:
-        inplace (bool, optional): can optionally do the operation in-place
+        inplace (bool, optional): can optionally do the operation in-place. Default: False
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -299,7 +310,7 @@ class GLU(Module):
     the input vector and `b` is the second half.
 
     Args:
-        dim (int): the dimension on which to split the input
+        dim (int): the dimension on which to split the input. Default: -1
 
     Shape:
         - Input: :math:`(*, N, *)` where `*` means, any number of additional
@@ -366,7 +377,7 @@ class LeakyReLU(Module):
 
     Args:
         negative_slope: Controls the angle of the negative slope. Default: 1e-2
-        inplace: can optionally do the operation in-place
+        inplace: can optionally do the operation in-place. Default: False
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
