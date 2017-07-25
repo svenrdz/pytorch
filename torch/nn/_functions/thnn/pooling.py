@@ -618,7 +618,7 @@ class Rmac1d(Function):
 
         all_output = cat(all_output, 2)
         region_norms = all_output.norm(2,1).expand_as(all_output) + eps
-        all_output = all_output.div(region_norms).sum(2).squeeze(2)
+        all_output = all_output.div(region_norms).sum(2).squeeze()
         self.all_indices = all_indices
 
         # Necessary as the output becomes 1 everywhere when dividing by
@@ -726,7 +726,7 @@ class Rmac2d(Function):
 
         all_output = cat(all_output, 2)
         region_norms = all_output.norm(2,1).expand_as(all_output) + eps
-        all_output = all_output.div(region_norms).sum(2).squeeze(2)
+        all_output = all_output.div(region_norms).sum(2).squeeze()
         self.all_indices = all_indices
 
         # Necessary as the output becomes 1 everywhere when dividing by
@@ -875,7 +875,7 @@ class Raac1d(Function):
 
         all_output = cat(all_output, 2)
         region_norms = all_output.norm(2,1).expand_as(all_output) + eps
-        all_output = all_output.div(region_norms).sum(2).squeeze(2)
+        all_output = all_output.div(region_norms).sum(2).squeeze()
         self.all_sizes = all_sizes
 
         # Necessary as the output becomes 1 everywhere when dividing by
