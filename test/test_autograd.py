@@ -380,6 +380,51 @@ class TestAutograd(TestCase):
         sum(fn(x, y)).sum().backward()
         self.assertTrue(was_called[0])
 
+    def test_retain_grad(self):
+        input = Variable(torch.rand(1, 3), requires_grad=True)
+        h1 = input * 3
+        out = (h1 * h1).sum()
+
+        # It should be possible to call retain_grad() multiple times
+        h1.retain_grad()
+        h1.retain_grad()
+
+        # Gradient should be accumulated
+        out.backward(retain_graph=True)
+        self.assertEqual(h1.data * 2, h1.grad.data)
+        out.backward(retain_graph=True)
+        self.assertEqual(h1.data * 4, h1.grad.data)
+
+        input.grad.data.zero_()
+        # It should be a no-op for leaves
+        input.retain_grad()
+        input.retain_grad()
+        out.backward()
+        self.assertEqual(input.data * 18, input.grad.data)
+
+    def test_retain_grad_cycle(self):
+        import gc
+        import weakref
+        counter = [0]
+        refs = [None]
+
+        x = Variable(torch.ones(5, 5), requires_grad=True)
+
+        def run_test():
+            y = x * 2
+            y.retain_grad()
+
+            def inc(*args):
+                counter[0] += 1
+            refs[0] = weakref.ref(y, inc)
+            return y / 2
+
+        z = run_test()
+        gc.collect()
+        self.assertIsNone(refs[0]())
+        self.assertEqual(counter[0], 1)
+        z.sum().backward()
+
     def test_backward(self):
         v_t = torch.randn(5, 5)
         x_t = torch.randn(5, 5)
@@ -1029,6 +1074,12 @@ class TestAutograd(TestCase):
         b = torch.max(a, 1, True)[1].repeat(1, 5).double()
         o = (b + a).sum()
         o.backward()
+
+    def test_shape(self):
+        x = Variable(torch.randn(3, 4))
+        self.assertEqual(2, len(x.shape))
+        self.assertEqual(x.shape[0], 3)
+        self.assertEqual(x.shape[1], 4)
 
     def test_return_leaf(self):
         class Identity(Function):
